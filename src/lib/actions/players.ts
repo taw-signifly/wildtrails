@@ -106,17 +106,19 @@ export async function getPlayers(
     }
     
     if (filters?.ranking && filters.ranking.min !== undefined && filters.ranking.max !== undefined) {
+      const { min: rankingMin, max: rankingMax } = filters.ranking
       players = players.filter(p => 
         p.ranking && 
-        p.ranking >= filters.ranking.min && 
-        p.ranking <= filters.ranking.max
+        p.ranking >= rankingMin && 
+        p.ranking <= rankingMax
       )
     }
     
     if (filters?.winPercentage && filters.winPercentage.min !== undefined && filters.winPercentage.max !== undefined) {
+      const { min: winPercentageMin, max: winPercentageMax } = filters.winPercentage
       players = players.filter(p => 
-        p.stats.winPercentage >= filters.winPercentage.min && 
-        p.stats.winPercentage <= filters.winPercentage.max
+        p.stats.winPercentage >= winPercentageMin && 
+        p.stats.winPercentage <= winPercentageMax
       )
     }
     
@@ -475,16 +477,18 @@ export async function searchPlayers(
         )
       }
       if (filters.ranking && filters.ranking.min !== undefined && filters.ranking.max !== undefined) {
+        const { min: rankingMin, max: rankingMax } = filters.ranking
         players = players.filter(p => 
           p.ranking && 
-          p.ranking >= filters.ranking.min && 
-          p.ranking <= filters.ranking.max
+          p.ranking >= rankingMin && 
+          p.ranking <= rankingMax
         )
       }
       if (filters.winPercentage && filters.winPercentage.min !== undefined && filters.winPercentage.max !== undefined) {
+        const { min: winPercentageMin, max: winPercentageMax } = filters.winPercentage
         players = players.filter(p => 
-          p.stats.winPercentage >= filters.winPercentage.min && 
-          p.stats.winPercentage <= filters.winPercentage.max
+          p.stats.winPercentage >= winPercentageMin && 
+          p.stats.winPercentage <= winPercentageMax
         )
       }
     }
