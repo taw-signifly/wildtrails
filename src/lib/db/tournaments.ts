@@ -25,21 +25,25 @@ export class TournamentDB extends BaseDB<Tournament> {
       // Validate form data
       const validatedFormData = TournamentFormDataSchema.parse(formData)
       
-      // Convert form data to tournament entity
+      // Convert form data to tournament entity with default settings
+      const defaultSettings = {
+        allowLateRegistration: true,
+        automaticBracketGeneration: true,
+        requireCheckin: true,
+        courtAssignmentMode: 'automatic' as const,
+        scoringMode: 'self-report' as const,
+        realTimeUpdates: true,
+        allowSpectators: true
+      }
+
       const tournamentData = {
         ...validatedFormData,
         status: 'setup' as TournamentStatus,
         currentPlayers: 0,
         endDate: undefined,
         settings: {
-          allowLateRegistration: true,
-          automaticBracketGeneration: true,
-          requireCheckin: true,
-          courtAssignmentMode: 'automatic' as const,
-          scoringMode: 'self-report' as const,
-          realTimeUpdates: true,
-          allowSpectators: true,
-          ...validatedFormData.settings
+          ...defaultSettings,
+          ...(validatedFormData.settings || {})
         },
         stats: {
           totalMatches: 0,
@@ -200,11 +204,17 @@ export class TournamentDB extends BaseDB<Tournament> {
       }
 
       // Update tournament with final stats and completion
-      const updateResult = await this.update(id, { 
-        status: 'completed',
-        endDate: new Date().toISOString(),
+      // Ensure endDate is at least 1 second after startDate to satisfy validation
+      const startDate = new Date(tournament.startDate)
+      const endDate = new Date(Math.max(Date.now(), startDate.getTime() + 1000))
+      
+      const updateData = { 
+        status: 'completed' as TournamentStatus,
+        endDate: endDate.toISOString(),
         stats: finalStats ? { ...tournament.stats, ...finalStats } : tournament.stats
-      })
+      }
+      
+      const updateResult = await this.update(id, updateData)
 
       if (updateResult.error) {
         throw updateResult.error
@@ -482,16 +492,43 @@ export class TournamentDB extends BaseDB<Tournament> {
         dataPath: 'data/tournaments/completed' 
       })
       
-      // Save to completed directory
-      await completedDB.writeFile(
-        completedDB.getFilePath(tournament.id),
-        tournament
-      )
+      // Create a new record in the completed directory
+      // We need to strip the timestamps and ID to create a fresh record
+      const { id, createdAt, updatedAt, ...tournamentData } = tournament
+      const createResult = await completedDB.create({
+        name: tournament.name,
+        type: tournament.type,
+        format: tournament.format,
+        maxPoints: tournament.maxPoints,
+        shortForm: tournament.shortForm,
+        startDate: tournament.startDate,
+        description: tournament.description,
+        location: tournament.location,
+        organizer: tournament.organizer,
+        maxPlayers: tournament.maxPlayers,
+        settings: tournament.settings
+      })
       
-      // Remove from active directory
-      const activeFilePath = this.getFilePath(tournament.id)
-      if (await this.fileExists(activeFilePath)) {
-        await this.delete(tournament.id)
+      if (createResult.error) {
+        throw createResult.error
+      }
+      
+      // Update the created record to match the original tournament data
+      const updateResult = await completedDB.update(createResult.data.id, {
+        status: tournament.status,
+        currentPlayers: tournament.currentPlayers,
+        endDate: tournament.endDate,
+        stats: tournament.stats
+      } as any)
+      
+      if (updateResult.error) {
+        throw updateResult.error
+      }
+      
+      // Remove from active directory  
+      const deleteResult = await this.delete(tournament.id)
+      if (deleteResult.error) {
+        console.warn(`Failed to delete original tournament file: ${deleteResult.error.message}`)
       }
     } catch (error) {
       const errorMsg = `Failed to move tournament ${tournament.id} to completed directory: ${error instanceof Error ? error.message : 'Unknown error'}`
