@@ -104,6 +104,7 @@ export interface Team {
   bracketType: BracketType
   stats: TeamStats
   createdAt: string
+  updatedAt: string
 }
 
 export interface TeamStats {

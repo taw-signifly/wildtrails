@@ -122,6 +122,13 @@ export const PlayerFiltersSchema = z.object({
 // Team-related schemas (since teams are collections of players)
 export const BracketTypeSchema = z.enum(['winner', 'loser', 'consolation'])
 
+// Team Form Data Schema (for creating/updating teams)
+export const TeamFormDataSchema = z.object({
+  name: z.string().min(1, 'Team name is required').max(100, 'Team name must be less than 100 characters'),
+  players: z.array(z.string().min(1, 'Player ID is required')).min(1, 'Team must have at least one player').max(3, 'Team cannot have more than 3 players'),
+  tournamentId: z.string().min(1, 'Tournament ID is required')
+})
+
 export const TeamStatsSchema = z.object({
   matchesPlayed: z.number().min(0),
   matchesWon: z.number().min(0),
@@ -155,7 +162,8 @@ export const TeamSchema = z.object({
   seed: z.number().int().min(1).optional(),
   bracketType: BracketTypeSchema,
   stats: TeamStatsSchema,
-  createdAt: z.string().datetime()
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
 }).refine((data) => {
   // Validate team composition based on game format
   const playerCount = data.players.length
@@ -175,6 +183,7 @@ export type PlayerStats = z.infer<typeof PlayerStatsSchema>
 export type PlayerPreferences = z.infer<typeof PlayerPreferencesSchema>
 export type Team = z.infer<typeof TeamSchema>
 export type TeamStats = z.infer<typeof TeamStatsSchema>
+export type TeamFormData = z.infer<typeof TeamFormDataSchema>
 
 // Utility Functions
 export const validatePlayerFormData = (data: unknown) => {
@@ -195,6 +204,10 @@ export const validatePlayerFilters = (data: unknown) => {
 
 export const validateTeam = (data: unknown) => {
   return TeamSchema.safeParse(data)
+}
+
+export const validateTeamFormData = (data: unknown) => {
+  return TeamFormDataSchema.safeParse(data)
 }
 
 // Helper function to create display name

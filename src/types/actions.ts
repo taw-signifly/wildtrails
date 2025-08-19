@@ -2,8 +2,9 @@
  * Server Action Types for Tournament Management System
  */
 
-import { Tournament, TournamentFormData, PaginatedResponse, TournamentFilters } from '@/types'
+import { Tournament, TournamentFormData, PaginatedResponse, TournamentFilters, Player, PlayerFormData, PlayerFilters, PlayerStats, Team, GameFormat, TeamStats } from '@/types'
 import { PaginationParams } from '@/lib/api'
+import { TeamFormData } from '@/lib/validation/player'
 
 /**
  * Action result type for form handling
@@ -54,6 +55,63 @@ export type StartTournamentAction = TypedAction<string, Tournament>
 export type RegisterPlayerAction = TypedAction<{ tournamentId: string; playerId: string }, Tournament>
 export type RemovePlayerAction = TypedAction<{ tournamentId: string; playerId: string }, Tournament>
 export type CancelTournamentAction = TypedAction<string, Tournament>
+
+/**
+ * Player-specific action types
+ */
+
+// Player creation actions
+export type CreatePlayerAction = ServerAction<Player>
+export type CreatePlayerDataAction = TypedAction<PlayerFormData, Player>
+
+// Player update actions
+export type UpdatePlayerAction = (id: string, formData: FormData) => Promise<ActionResult<Player>>
+export type UpdatePlayerDataAction = TypedAction<{ id: string; data: Partial<PlayerFormData> }, Player>
+
+// Player deletion action
+export type DeletePlayerAction = TypedAction<string, { id: string; archived: boolean }>
+
+// Player retrieval actions
+export type GetPlayersAction = (filters?: PlayerFilters & PaginationParams) => Promise<ActionResult<PaginatedResponse<Player>>>
+export type GetPlayerByIdAction = (id: string) => Promise<ActionResult<Player>>
+export type SearchPlayersAction = (query: string, filters?: PlayerFilters) => Promise<ActionResult<Player[]>>
+
+// Player statistics actions
+export type UpdatePlayerStatsAction = TypedAction<{ playerId: string; stats: Partial<PlayerStats> }, Player>
+export type GetPlayerTournamentHistoryAction = (playerId: string, limit?: number) => Promise<ActionResult<unknown[]>>
+export type GetPlayerPerformanceStatsAction = (playerId: string) => Promise<ActionResult<PlayerStats>>
+
+/**
+ * Team-specific action types
+ */
+
+// Team creation actions
+export type CreateTeamAction = ServerAction<Team>
+export type CreateTeamDataAction = TypedAction<TeamFormData, Team>
+
+// Team update actions
+export type UpdateTeamAction = (id: string, formData: FormData) => Promise<ActionResult<Team>>
+export type UpdateTeamDataAction = TypedAction<{ id: string; data: Partial<TeamFormData> }, Team>
+
+// Team deletion action
+export type DeleteTeamAction = TypedAction<string, { id: string; archived: boolean }>
+
+// Team retrieval actions
+export interface TeamFilters {
+  tournamentId?: string
+  bracketType?: Team['bracketType']
+}
+export type GetTeamsAction = (filters?: TeamFilters & PaginationParams) => Promise<ActionResult<PaginatedResponse<Team>>>
+export type GetTeamByIdAction = (id: string) => Promise<ActionResult<Team>>
+export type GetTeamsByTournamentAction = (tournamentId: string) => Promise<ActionResult<Team[]>>
+
+// Team member management actions
+export type AddPlayerToTeamAction = TypedAction<{ teamId: string; playerId: string }, Team>
+export type RemovePlayerFromTeamAction = TypedAction<{ teamId: string; playerId: string }, Team>
+export type ValidateTeamFormationAction = TypedAction<{ players: string[]; format: GameFormat }, boolean>
+
+// Team statistics actions
+export type UpdateTeamStatsAction = TypedAction<{ teamId: string; stats: Partial<TeamStats> }, Team>
 
 /**
  * Form data validation helpers
