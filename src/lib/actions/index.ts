@@ -155,7 +155,8 @@ export {
   getMatchHistory,
   getEndByEndDetails,
   undoLastEnd,
-  updateScoreForm
+  updateScoreForm,
+  updateMatchScoreForm
 } from './live-scoring'
 
 // Court Management Actions
@@ -180,6 +181,7 @@ export {
 // Bracket Management Actions
 export {
   generateBracketMatches,
+  generateBracketMatchesForm,
   updateBracketProgression,
   getActiveTournamentMatches,
   getBracketStructure,

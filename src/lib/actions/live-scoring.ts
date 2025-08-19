@@ -63,23 +63,28 @@ function formDataToEndData(formData: FormData): Omit<End, 'id' | 'createdAt'> {
     jackPosition = { x: 7.5, y: 2.5 } // Middle of standard court
   }
   
-  // Parse boules data (optional)
+  // Parse boules data (optional) with proper validation
   let boules: Boule[] = []
   const boulesData = formData.getAll('boules')
   if (boulesData.length > 0) {
     boules = boulesData.map((bouleData, index) => {
       try {
         const parsed = JSON.parse(bouleData.toString())
-        return {
+        // Validate parsed data with Zod schema
+        const validatedBoule = BouleSchema.parse({
           id: parsed.id || `boule-${index}`,
           teamId: parsed.teamId,
           playerId: parsed.playerId,
           position: parsed.position,
           distance: parsed.distance,
           order: parsed.order || index + 1
+        })
+        return validatedBoule
+      } catch (parseError) {
+        if (parseError instanceof SyntaxError) {
+          throw new Error(`Invalid JSON in boule data at index ${index}`)
         }
-      } catch {
-        throw new Error(`Invalid boule data at index ${index}`)
+        throw new Error(`Invalid boule data at index ${index}: ${parseError instanceof Error ? parseError.message : 'Validation failed'}`)
       }
     })
   }
@@ -100,7 +105,45 @@ function formDataToEndData(formData: FormData): Omit<End, 'id' | 'createdAt'> {
 }
 
 /**
- * Update match score in real-time
+ * Update match score in real-time (form-compatible interface)
+ */
+export async function updateMatchScoreForm(formData: FormData): Promise<ActionResult<Match>> {
+  try {
+    const matchId = formData.get('matchId')?.toString()
+    const team1Score = formData.get('team1Score')?.toString()
+    const team2Score = formData.get('team2Score')?.toString()
+    const isComplete = formData.get('isComplete') === 'true'
+    
+    if (!matchId) {
+      return {
+        success: false,
+        error: 'Match ID is required'
+      }
+    }
+    
+    const scoreUpdate: Partial<Score> = {
+      isComplete
+    }
+    
+    if (team1Score !== undefined && team1Score !== '') {
+      scoreUpdate.team1 = parseInt(team1Score, 10)
+    }
+    
+    if (team2Score !== undefined && team2Score !== '') {
+      scoreUpdate.team2 = parseInt(team2Score, 10)
+    }
+    
+    return await updateMatchScore(matchId, scoreUpdate)
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to update match score'
+    }
+  }
+}
+
+/**
+ * Update match score in real-time (programmatic interface)
  */
 export async function updateMatchScore(matchId: string, scoreUpdate: Partial<Score>): Promise<ActionResult<Match>> {
   try {

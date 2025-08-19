@@ -281,17 +281,65 @@ class SSEConnectionManager {
       }
     })
   }
+
+  /**
+   * Clean up all connections and event history
+   */
+  cleanup(): void {
+    // Close all active connections
+    for (const [streamId, streamConnections] of this.connections) {
+      for (const [connectionId, controller] of streamConnections) {
+        try {
+          controller.close()
+        } catch (error) {
+          console.error(`SSE: Failed to close connection ${connectionId}:`, error)
+        }
+      }
+    }
+    
+    // Clear all data structures
+    this.connections.clear()
+    this.eventHistory.clear()
+  }
 }
 
 // Global connection manager instance
 const connectionManager = new SSEConnectionManager()
 
-// Setup keepalive interval (every 30 seconds)
-if (typeof window === 'undefined') { // Only run on server
-  setInterval(() => {
-    connectionManager.sendKeepalive()
-  }, 30000)
+// Keepalive interval management
+let keepaliveInterval: NodeJS.Timeout | null = null
+
+/**
+ * Start the keepalive mechanism for SSE connections
+ */
+export function startKeepAlive(): void {
+  if (typeof window === 'undefined' && !keepaliveInterval) { // Only run on server
+    keepaliveInterval = setInterval(() => {
+      connectionManager.sendKeepalive()
+    }, 30000)
+  }
 }
+
+/**
+ * Stop the keepalive mechanism and clean up resources
+ */
+export function stopKeepAlive(): void {
+  if (keepaliveInterval) {
+    clearInterval(keepaliveInterval)
+    keepaliveInterval = null
+  }
+}
+
+/**
+ * Clean up all SSE connections and intervals
+ */
+export function cleanup(): void {
+  stopKeepAlive()
+  connectionManager.cleanup()
+}
+
+// Auto-start keepalive on module load
+startKeepAlive()
 
 /**
  * Create an SSE stream response

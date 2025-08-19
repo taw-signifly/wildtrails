@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { matchDB } from '@/lib/db/matches'
-import { MatchFormDataSchema, MatchFiltersSchema } from '@/lib/validation/match'
+import { MatchFormDataSchema, MatchFiltersSchema, EndSchema } from '@/lib/validation/match'
 import { parsePaginationParams, paginateArray } from '@/lib/api'
 import { resultToActionResult, parseFormDataField, parseFormDataNumber, formatZodErrors } from '@/lib/api/action-utils'
 import { broadcastMatchStart, broadcastMatchComplete, broadcastMatchUpdate } from '@/lib/api/sse'
@@ -27,21 +27,35 @@ function formDataToMatchData(formData: FormData): Partial<MatchFormData> {
   )
   if (team2Score !== undefined) data.team2Score = team2Score
   
-  // End scores array parsing (if provided)
+  // End scores array parsing (if provided) with proper validation
   const endScoresData = formData.getAll('endScores')
   if (endScoresData.length > 0) {
     const endScores = endScoresData.map((endScore, index) => {
       try {
-        const parsedEnd = JSON.parse(endScore.toString())
+        const parsed = JSON.parse(endScore.toString())
+        // Validate parsed data with Zod schema
+        // First validate the end data structure
+        EndSchema.omit({ id: true }).parse({
+          endNumber: parsed.endNumber || index + 1,
+          team1Points: parseFormDataNumber(parsed.team1Points?.toString(), 0, 6),
+          team2Points: parseFormDataNumber(parsed.team2Points?.toString(), 0, 6),
+          jackPosition: parsed.jackPosition,
+          boules: parsed.boules || []
+        })
+        
+        // Return EndScore format
         return {
-          endNumber: parsedEnd.endNumber || index + 1,
-          team1Points: parseFormDataNumber(parsedEnd.team1Points.toString(), 0, 6),
-          team2Points: parseFormDataNumber(parsedEnd.team2Points.toString(), 0, 6),
-          jackPosition: parsedEnd.jackPosition,
-          boules: parsedEnd.boules
+          endNumber: parsed.endNumber || index + 1,
+          team1Points: parseFormDataNumber(parsed.team1Points?.toString(), 0, 6),
+          team2Points: parseFormDataNumber(parsed.team2Points?.toString(), 0, 6),
+          jackPosition: parsed.jackPosition,
+          boules: parsed.boules || []
         }
-      } catch {
-        throw new Error(`Invalid end score data at index ${index}`)
+      } catch (parseError) {
+        if (parseError instanceof SyntaxError) {
+          throw new Error(`Invalid JSON in end score data at index ${index}`)
+        }
+        throw new Error(`Invalid end score data at index ${index}: ${parseError instanceof Error ? parseError.message : 'Validation failed'}`)
       }
     })
     data.endScores = endScores
