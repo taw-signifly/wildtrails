@@ -389,6 +389,21 @@ export interface PlayerFilters {
   }
 }
 
+export interface TournamentParticipation {
+  tournamentId: string
+  tournamentName: string
+  type: TournamentType
+  format: GameFormat
+  finishPosition: number
+  teamName?: string
+  pointsScored: number
+  pointsAgainst: number
+  matchesPlayed: number
+  matchesWon: number
+  participationDate: string
+  placement: string // "1st", "2nd", "Quarterfinals", etc.
+}
+
 export interface MatchFilters {
   status?: MatchStatus
   round?: number

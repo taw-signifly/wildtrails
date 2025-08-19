@@ -30,21 +30,42 @@ function formDataToTeamData(formData: FormData): Partial<TeamFormData> {
   // Players array - can be multiple values with same name or JSON string
   const playersJson = formData.get('players')
   if (playersJson) {
-    try {
-      const players = JSON.parse(playersJson.toString())
-      if (Array.isArray(players)) {
-        data.players = players.filter(id => typeof id === 'string' && id.trim().length > 0)
-      }
-    } catch {
-      // Fall back to individual player fields
-      const players: string[] = []
-      formData.forEach((value, key) => {
-        if (key.startsWith('player') && typeof value === 'string' && value.trim().length > 0) {
-          players.push(value.trim())
+    const playersString = playersJson.toString().trim()
+    
+    // Only attempt JSON parsing if the string looks like JSON
+    if (playersString.startsWith('[') && playersString.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(playersString)
+        if (Array.isArray(parsed)) {
+          // Validate that all items are non-empty strings
+          const validPlayers = parsed.filter(id => 
+            typeof id === 'string' && 
+            id.trim().length > 0 && 
+            id.length <= 50 // Reasonable max length for player ID
+          )
+          if (validPlayers.length > 0) {
+            data.players = validPlayers.map(id => id.trim())
+          }
+        } else {
+          throw new Error('Players must be an array')
         }
-      })
-      if (players.length > 0) {
-        data.players = players
+      } catch (error) {
+        // JSON parsing failed - fall back to individual player fields
+        console.warn('Failed to parse players JSON, falling back to individual fields:', error)
+        const players: string[] = []
+        formData.forEach((value, key) => {
+          if (key.startsWith('player') && typeof value === 'string' && value.trim().length > 0) {
+            players.push(value.trim())
+          }
+        })
+        if (players.length > 0) {
+          data.players = players
+        }
+      }
+    } else {
+      // Treat as a single player ID if not JSON format
+      if (playersString.length > 0 && playersString.length <= 50) {
+        data.players = [playersString]
       }
     }
   }
@@ -189,23 +210,38 @@ export async function createTeam(formData: FormData): Promise<ActionResult<Team>
     }
     
     // Business rule: Check players can join team (no duplicate memberships)
-    for (const playerId of validation.data.players) {
+    // Use Promise.all for parallel validation instead of sequential to prevent race conditions
+    const playerValidationPromises = validation.data.players.map(async (playerId) => {
       const canJoinResult = await teamDB.canPlayerJoinTeam(playerId, validation.data.tournamentId)
-      if (canJoinResult.error) {
-        return {
-          success: false,
-          error: canJoinResult.error.message || 'Failed to validate player eligibility'
-        }
-      }
+      return { playerId, canJoinResult }
+    })
+    
+    try {
+      const validationResults = await Promise.all(playerValidationPromises)
       
-      if (!canJoinResult.data) {
-        return {
-          success: false,
-          error: 'One or more players are already in a team for this tournament',
-          fieldErrors: { 
-            players: ['One or more players are already in a team for this tournament'] 
+      // Check for validation errors
+      for (const { playerId, canJoinResult } of validationResults) {
+        if (canJoinResult.error) {
+          return {
+            success: false,
+            error: `Failed to validate player eligibility for player ${playerId}: ${canJoinResult.error.message}`
           }
         }
+        
+        if (!canJoinResult.data) {
+          return {
+            success: false,
+            error: 'One or more players are already in a team for this tournament',
+            fieldErrors: { 
+              players: [`Player ${playerId} is already in a team for this tournament`] 
+            }
+          }
+        }
+      }
+    } catch {
+      return {
+        success: false,
+        error: 'Failed to validate player eligibility due to an unexpected error'
       }
     }
     
@@ -271,23 +307,38 @@ export async function createTeamData(data: TeamFormData): Promise<ActionResult<T
     }
     
     // Business rule: Check players can join team
-    for (const playerId of validation.data.players) {
+    // Use Promise.all for parallel validation instead of sequential to prevent race conditions
+    const playerValidationPromises = validation.data.players.map(async (playerId) => {
       const canJoinResult = await teamDB.canPlayerJoinTeam(playerId, validation.data.tournamentId)
-      if (canJoinResult.error) {
-        return {
-          success: false,
-          error: canJoinResult.error.message || 'Failed to validate player eligibility'
-        }
-      }
+      return { playerId, canJoinResult }
+    })
+    
+    try {
+      const validationResults = await Promise.all(playerValidationPromises)
       
-      if (!canJoinResult.data) {
-        return {
-          success: false,
-          error: 'One or more players are already in a team for this tournament',
-          fieldErrors: { 
-            players: ['One or more players are already in a team for this tournament'] 
+      // Check for validation errors
+      for (const { playerId, canJoinResult } of validationResults) {
+        if (canJoinResult.error) {
+          return {
+            success: false,
+            error: `Failed to validate player eligibility for player ${playerId}: ${canJoinResult.error.message}`
           }
         }
+        
+        if (!canJoinResult.data) {
+          return {
+            success: false,
+            error: 'One or more players are already in a team for this tournament',
+            fieldErrors: { 
+              players: [`Player ${playerId} is already in a team for this tournament`] 
+            }
+          }
+        }
+      }
+    } catch {
+      return {
+        success: false,
+        error: 'Failed to validate player eligibility due to an unexpected error'
       }
     }
     
@@ -426,6 +477,7 @@ export async function updateTeam(id: string, formData: FormData): Promise<Action
       })
     } else {
       // Only update non-player fields
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { players, ...updateData } = validation.data
       updateResult = await teamDB.update(id, updateData)
     }
@@ -556,6 +608,7 @@ export async function updateTeamData(
       })
     } else {
       // Only update non-player fields
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { players, ...updateData } = validation.data
       updateResult = await teamDB.update(id, updateData)
     }

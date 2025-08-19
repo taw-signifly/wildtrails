@@ -5,8 +5,44 @@ import { playerDB } from '@/lib/db/players'
 import { PlayerFormDataSchema } from '@/lib/validation/player'
 import { paginateArray } from '@/lib/api'
 import { resultToActionResult, parseFormDataField, parseFormDataNumber, formatZodErrors } from '@/lib/api/action-utils'
-import { Player, PlayerFormData, PlayerFilters, PlayerStats } from '@/types'
+import { Player, PlayerFormData, PlayerFilters, PlayerStats, TournamentParticipation } from '@/types'
 import { ActionResult } from '@/types/actions'
+
+/**
+ * Validate email uniqueness - returns error result if email already exists
+ */
+async function validateEmailUniqueness(
+  email: string, 
+  excludeId?: string
+): Promise<{ isValid: boolean; error?: ActionResult<never> }> {
+  const existingPlayerResult = await playerDB.findByEmail(email)
+  
+  if (existingPlayerResult.error) {
+    return {
+      isValid: false,
+      error: {
+        success: false,
+        error: existingPlayerResult.error.message || 'Failed to check email uniqueness'
+      }
+    }
+  }
+  
+  // Allow same player to keep their email during updates
+  if (existingPlayerResult.data && existingPlayerResult.data.id !== excludeId) {
+    return {
+      isValid: false,
+      error: {
+        success: false,
+        error: 'Email already exists',
+        fieldErrors: { 
+          email: ['A player with this email already exists'] 
+        }
+      }
+    }
+  }
+  
+  return { isValid: true }
+}
 
 /**
  * Convert FormData to PlayerFormData object with type safety
@@ -63,23 +99,24 @@ export async function getPlayers(
     
     // Apply filters
     if (filters?.club) {
+      const clubFilter = filters.club.toLowerCase()
       players = players.filter(p => 
-        p.club && p.club.toLowerCase().includes(filters.club!.toLowerCase())
+        p.club && p.club.toLowerCase().includes(clubFilter)
       )
     }
     
-    if (filters?.ranking) {
+    if (filters?.ranking && filters.ranking.min !== undefined && filters.ranking.max !== undefined) {
       players = players.filter(p => 
         p.ranking && 
-        p.ranking >= filters.ranking!.min && 
-        p.ranking <= filters.ranking!.max
+        p.ranking >= filters.ranking.min && 
+        p.ranking <= filters.ranking.max
       )
     }
     
-    if (filters?.winPercentage) {
+    if (filters?.winPercentage && filters.winPercentage.min !== undefined && filters.winPercentage.max !== undefined) {
       players = players.filter(p => 
-        p.stats.winPercentage >= filters.winPercentage!.min && 
-        p.stats.winPercentage <= filters.winPercentage!.max
+        p.stats.winPercentage >= filters.winPercentage.min && 
+        p.stats.winPercentage <= filters.winPercentage.max
       )
     }
     
@@ -164,22 +201,9 @@ export async function createPlayer(formData: FormData): Promise<ActionResult<Pla
     }
     
     // Business rule: Check email uniqueness
-    const existingPlayerResult = await playerDB.findByEmail(validation.data.email)
-    if (existingPlayerResult.error) {
-      return {
-        success: false,
-        error: existingPlayerResult.error.message || 'Failed to check email uniqueness'
-      }
-    }
-    
-    if (existingPlayerResult.data) {
-      return {
-        success: false,
-        error: 'Email already exists',
-        fieldErrors: { 
-          email: ['A player with this email already exists'] 
-        }
-      }
+    const emailValidation = await validateEmailUniqueness(validation.data.email)
+    if (!emailValidation.isValid && emailValidation.error) {
+      return emailValidation.error
     }
     
     // Create player in database
@@ -220,22 +244,9 @@ export async function createPlayerData(data: PlayerFormData): Promise<ActionResu
     }
     
     // Business rule: Check email uniqueness
-    const existingPlayerResult = await playerDB.findByEmail(validation.data.email)
-    if (existingPlayerResult.error) {
-      return {
-        success: false,
-        error: existingPlayerResult.error.message || 'Failed to check email uniqueness'
-      }
-    }
-    
-    if (existingPlayerResult.data) {
-      return {
-        success: false,
-        error: 'Email already exists',
-        fieldErrors: { 
-          email: ['A player with this email already exists'] 
-        }
-      }
+    const emailValidation = await validateEmailUniqueness(validation.data.email)
+    if (!emailValidation.isValid && emailValidation.error) {
+      return emailValidation.error
     }
     
     // Create player in database
@@ -289,23 +300,9 @@ export async function updatePlayer(id: string, formData: FormData): Promise<Acti
     
     // Business rule: Check email uniqueness if email is being updated
     if (validation.data.email) {
-      const existingPlayerResult = await playerDB.findByEmail(validation.data.email)
-      if (existingPlayerResult.error) {
-        return {
-          success: false,
-          error: existingPlayerResult.error.message || 'Failed to check email uniqueness'
-        }
-      }
-      
-      // Allow same player to keep their email, but not another player
-      if (existingPlayerResult.data && existingPlayerResult.data.id !== id) {
-        return {
-          success: false,
-          error: 'Email already exists',
-          fieldErrors: { 
-            email: ['A player with this email already exists'] 
-          }
-        }
+      const emailValidation = await validateEmailUniqueness(validation.data.email, id)
+      if (!emailValidation.isValid && emailValidation.error) {
+        return emailValidation.error
       }
     }
     
@@ -361,23 +358,9 @@ export async function updatePlayerData(
     
     // Business rule: Check email uniqueness if email is being updated
     if (validation.data.email) {
-      const existingPlayerResult = await playerDB.findByEmail(validation.data.email)
-      if (existingPlayerResult.error) {
-        return {
-          success: false,
-          error: existingPlayerResult.error.message || 'Failed to check email uniqueness'
-        }
-      }
-      
-      // Allow same player to keep their email, but not another player
-      if (existingPlayerResult.data && existingPlayerResult.data.id !== id) {
-        return {
-          success: false,
-          error: 'Email already exists',
-          fieldErrors: { 
-            email: ['A player with this email already exists'] 
-          }
-        }
+      const emailValidation = await validateEmailUniqueness(validation.data.email, id)
+      if (!emailValidation.isValid && emailValidation.error) {
+        return emailValidation.error
       }
     }
     
@@ -486,21 +469,22 @@ export async function searchPlayers(
     // Apply additional filters if provided
     if (filters) {
       if (filters.club) {
+        const clubFilter = filters.club.toLowerCase()
         players = players.filter(p => 
-          p.club && p.club.toLowerCase().includes(filters.club!.toLowerCase())
+          p.club && p.club.toLowerCase().includes(clubFilter)
         )
       }
-      if (filters.ranking) {
+      if (filters.ranking && filters.ranking.min !== undefined && filters.ranking.max !== undefined) {
         players = players.filter(p => 
           p.ranking && 
-          p.ranking >= filters.ranking!.min && 
-          p.ranking <= filters.ranking!.max
+          p.ranking >= filters.ranking.min && 
+          p.ranking <= filters.ranking.max
         )
       }
-      if (filters.winPercentage) {
+      if (filters.winPercentage && filters.winPercentage.min !== undefined && filters.winPercentage.max !== undefined) {
         players = players.filter(p => 
-          p.stats.winPercentage >= filters.winPercentage!.min && 
-          p.stats.winPercentage <= filters.winPercentage!.max
+          p.stats.winPercentage >= filters.winPercentage.min && 
+          p.stats.winPercentage <= filters.winPercentage.max
         )
       }
     }
@@ -574,7 +558,7 @@ export async function updatePlayerStats(
 export async function getPlayerTournamentHistory(
   playerId: string, 
   limit?: number
-): Promise<ActionResult<unknown[]>> {
+): Promise<ActionResult<TournamentParticipation[]>> {
   try {
     if (!playerId) {
       return {
@@ -596,8 +580,8 @@ export async function getPlayerTournamentHistory(
     // For now, returning empty array as a placeholder
     // In full implementation, would integrate with tournament system
     // The limit parameter would be used to limit results
-    const tournaments: unknown[] = [] // Placeholder
-    const limitedTournaments = limit ? tournaments.slice(0, limit) : tournaments
+    const tournaments: TournamentParticipation[] = [] // Properly typed placeholder
+    const limitedTournaments = limit && limit > 0 ? tournaments.slice(0, limit) : tournaments
     
     return {
       success: true,
