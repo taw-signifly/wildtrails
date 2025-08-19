@@ -12,7 +12,6 @@ export {
   ValidationError,
   RecordNotFoundError,
   FileOperationError,
-  type DatabaseResult,
   type BaseEntity,
   type DatabaseConfig
 } from './base'
@@ -162,19 +161,19 @@ export class DatabaseManager {
 
     // Check each database
     for (const { name, db } of databases) {
-      try {
-        const count = await db.count()
-        result.databases[name as keyof typeof result.databases] = {
-          status: 'healthy',
-          count
-        }
-        healthyCount++
-      } catch (error) {
+      const countResult = await db.count()
+      if (countResult.error) {
         result.databases[name as keyof typeof result.databases] = {
           status: 'error',
           count: 0
         }
-        console.error(`Database ${name} health check failed:`, error)
+        console.error(`Database ${name} health check failed:`, countResult.error)
+      } else {
+        result.databases[name as keyof typeof result.databases] = {
+          status: 'healthy',
+          count: countResult.data
+        }
+        healthyCount++
       }
     }
 
@@ -237,9 +236,9 @@ export class DatabaseManager {
     }
   }> {
     const [
-      tournamentStats,
-      playerStats,
-      courtStats,
+      tournamentStatsResult,
+      playerStatsResult,
+      courtStatsResult,
       backupStats
     ] = await Promise.all([
       this.tournaments.getStatsSummary(),
@@ -248,22 +247,57 @@ export class DatabaseManager {
       this.backup.getBackupStats()
     ])
 
+    // Handle potential errors by providing default values
+    const tournamentStats = 'error' in tournamentStatsResult && tournamentStatsResult.error ? {
+      total: 0, 
+      byStatus: {} as Record<string, number>, 
+      totalPlayers: 0, 
+      byType: {} as Record<string, number>, 
+      byFormat: {} as Record<string, number>, 
+      averagePlayersPerTournament: 0
+    } : 'data' in tournamentStatsResult ? tournamentStatsResult.data : tournamentStatsResult
+
+    const playerStats = 'error' in playerStatsResult && playerStatsResult.error ? {
+      totalPlayers: 0, 
+      totalMatches: 0, 
+      activeClubs: [], 
+      averageWinPercentage: 0, 
+      topWinPercentage: 0, 
+      totalTournaments: 0, 
+      formatPreferences: {} as Record<string, number>
+    } : 'data' in playerStatsResult ? playerStatsResult.data : playerStatsResult
+
+    const courtStats = 'error' in courtStatsResult && courtStatsResult.error ? {
+      total: 0, 
+      available: 0, 
+      inUse: 0, 
+      maintenance: 0, 
+      reserved: 0, 
+      utilizationRate: 0, 
+      byLocation: {} as Record<string, number>, 
+      bySurface: {} as Record<string, number>
+    } : 'data' in courtStatsResult ? courtStatsResult.data : courtStatsResult
+
     // Get actual match stats
-    const totalMatches = await this.matches.count()
-    const activeMatches = await this.matches.count({ status: 'active' })
-    const completedMatches = await this.matches.count({ status: 'completed' })
+    const totalMatchesResult = await this.matches.count()
+    const activeMatchesResult = await this.matches.count({ status: 'active' })
+    const completedMatchesResult = await this.matches.count({ status: 'completed' })
+
+    const totalMatches = totalMatchesResult.error ? 0 : totalMatchesResult.data
+    const activeMatches = activeMatchesResult.error ? 0 : activeMatchesResult.data
+    const completedMatches = completedMatchesResult.error ? 0 : completedMatchesResult.data
 
     return {
       tournaments: {
-        total: tournamentStats.total,
-        active: tournamentStats.byStatus.active || 0,
-        completed: tournamentStats.byStatus.completed || 0,
-        totalPlayers: tournamentStats.totalPlayers
+        total: (tournamentStats as { total?: number }).total || 0,
+        active: (tournamentStats as { byStatus?: Record<string, number> }).byStatus?.active || 0,
+        completed: (tournamentStats as { byStatus?: Record<string, number> }).byStatus?.completed || 0,
+        totalPlayers: (tournamentStats as { totalPlayers?: number }).totalPlayers || 0
       },
       players: {
-        total: playerStats.totalPlayers,
-        active: playerStats.totalPlayers, // All players considered active
-        totalMatches: playerStats.totalMatches
+        total: (playerStats as { totalPlayers?: number }).totalPlayers || 0,
+        active: (playerStats as { totalPlayers?: number }).totalPlayers || 0, // All players considered active
+        totalMatches: (playerStats as { totalMatches?: number }).totalMatches || 0
       },
       matches: {
         total: totalMatches,
@@ -271,9 +305,9 @@ export class DatabaseManager {
         active: activeMatches
       },
       courts: {
-        total: courtStats.total,
-        available: courtStats.available,
-        inUse: courtStats.inUse
+        total: (courtStats as { total?: number }).total || 0,
+        available: (courtStats as { available?: number }).available || 0,
+        inUse: (courtStats as { inUse?: number }).inUse || 0
       },
       storage: {
         backupCount: backupStats.totalBackups,
@@ -340,9 +374,17 @@ export class DatabaseManager {
     const databases = [this.tournaments, this.players, this.matches, this.courts]
     
     for (const db of databases) {
-      const records = await db.findAll()
-      for (const record of records) {
-        await db.delete(record.id)
+      const recordsResult = await db.findAll()
+      if (recordsResult.error) {
+        console.warn('Failed to fetch records for deletion:', recordsResult.error)
+        continue
+      }
+      
+      for (const record of recordsResult.data) {
+        const deleteResult = await db.delete(record.id)
+        if (deleteResult.error) {
+          console.warn(`Failed to delete record ${record.id}:`, deleteResult.error)
+        }
       }
     }
   }
@@ -351,90 +393,119 @@ export class DatabaseManager {
    * Seed database with sample data (for development/testing)
    */
   async seedSampleData(): Promise<void> {
-    // Create sample courts
-    const court1 = await this.courts.create({
-      name: 'Court A',
-      location: 'Main Field',
-      dimensions: {
-        length: 14,
-        width: 4,
-        throwingDistance: 8
-      },
-      surface: 'gravel',
-      lighting: true,
-      covered: false,
-      amenities: ['Seating', 'Scoreboard']
-    })
-
-    const court2 = await this.courts.create({
-      name: 'Court B',
-      location: 'Main Field',
-      dimensions: {
-        length: 13,
-        width: 4,
-        throwingDistance: 7
-      },
-      surface: 'sand',
-      lighting: true,
-      covered: true,
-      amenities: ['Seating', 'Water Station']
-    })
-
-    // Create sample players
-    const players = await Promise.all([
-      this.players.create({
-        firstName: 'Alice',
-        lastName: 'Johnson',
-        email: 'alice.johnson@example.com',
-        phone: '+1234567890',
-        club: 'Downtown Petanque Club'
-      }),
-      this.players.create({
-        firstName: 'Bob',
-        lastName: 'Smith',
-        email: 'bob.smith@example.com',
-        phone: '+1234567891',
-        club: 'Downtown Petanque Club'
-      }),
-      this.players.create({
-        firstName: 'Carol',
-        lastName: 'Williams',
-        email: 'carol.williams@example.com',
-        phone: '+1234567892',
-        club: 'Riverside Petanque'
-      }),
-      this.players.create({
-        firstName: 'David',
-        lastName: 'Brown',
-        email: 'david.brown@example.com',
-        phone: '+1234567893',
-        club: 'Riverside Petanque'
+    try {
+      // Create sample courts
+      const court1Result = await this.courts.create({
+        name: 'Court A',
+        location: 'Main Field',
+        dimensions: {
+          length: 14,
+          width: 4,
+          throwingDistance: 8
+        },
+        surface: 'gravel',
+        lighting: true,
+        covered: false,
+        amenities: ['Seating', 'Scoreboard']
       })
-    ])
-
-    // Create sample tournament
-    const tournament = await this.tournaments.create({
-      name: 'Spring Championship 2025',
-      type: 'single-elimination',
-      format: 'doubles',
-      maxPoints: 13,
-      shortForm: false,
-      startDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      description: 'Annual spring tournament for all skill levels',
-      location: 'Main Field',
-      organizer: 'Tournament Committee',
-      maxPlayers: 16,
-      settings: {
-        allowLateRegistration: true,
-        automaticBracketGeneration: true
+      
+      if (court1Result.error) {
+        throw court1Result.error
       }
-    })
+      const court1 = court1Result.data
 
-    console.log('Sample data seeded successfully:', {
-      courts: [court1.id, court2.id],
-      players: players.map(p => p.id),
-      tournament: tournament.id
-    })
+      const court2Result = await this.courts.create({
+        name: 'Court B',
+        location: 'Main Field',
+        dimensions: {
+          length: 13,
+          width: 4,
+          throwingDistance: 7
+        },
+        surface: 'sand',
+        lighting: true,
+        covered: true,
+        amenities: ['Seating', 'Water Station']
+      })
+      
+      if (court2Result.error) {
+        throw court2Result.error
+      }
+      const court2 = court2Result.data
+
+      // Create sample players
+      const playerResults = await Promise.all([
+        this.players.create({
+          firstName: 'Alice',
+          lastName: 'Johnson',
+          email: 'alice.johnson@example.com',
+          phone: '+1234567890',
+          club: 'Downtown Petanque Club'
+        }),
+        this.players.create({
+          firstName: 'Bob',
+          lastName: 'Smith',
+          email: 'bob.smith@example.com',
+          phone: '+1234567891',
+          club: 'Downtown Petanque Club'
+        }),
+        this.players.create({
+          firstName: 'Carol',
+          lastName: 'Williams',
+          email: 'carol.williams@example.com',
+          phone: '+1234567892',
+          club: 'Riverside Petanque'
+        }),
+        this.players.create({
+          firstName: 'David',
+          lastName: 'Brown',
+          email: 'david.brown@example.com',
+          phone: '+1234567893',
+          club: 'Riverside Petanque'
+        })
+      ])
+
+      // Check for player creation errors
+      const players = []
+      for (const playerResult of playerResults) {
+        if (playerResult.error) {
+          throw playerResult.error
+        }
+        players.push(playerResult.data)
+      }
+
+      // Create sample tournament
+      const tournamentResult = await this.tournaments.create({
+        name: 'Spring Championship 2025',
+        type: 'single-elimination',
+        format: 'doubles',
+        maxPoints: 13,
+        shortForm: false,
+        startDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        description: 'Annual spring tournament for all skill levels',
+        location: 'Main Field',
+        organizer: 'Tournament Committee',
+        maxPlayers: 16,
+        settings: {
+          allowLateRegistration: true,
+          automaticBracketGeneration: true
+        }
+      })
+      
+      if (tournamentResult.error) {
+        throw tournamentResult.error
+      }
+      const tournament = tournamentResult.data
+
+      console.log('Sample data seeded successfully:', {
+        courts: [court1.id, court2.id],
+        players: players.map(p => p?.id).filter(Boolean),
+        tournament: tournament.id
+      })
+    } catch (error) {
+      console.error('Failed to seed sample data:', error)
+      throw error
+    }
   }
 }
 

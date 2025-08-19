@@ -2,6 +2,7 @@ import { promises as fs } from 'fs'
 import { join, dirname } from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
+import { Result, tryCatch } from '@/types'
 
 /**
  * Base database error classes
@@ -37,18 +38,6 @@ export class FileOperationError extends DatabaseError {
   }
 }
 
-/**
- * Database operation result types
- */
-export interface DatabaseResult<T> {
-  success: boolean
-  data?: T
-  error?: {
-    type: string
-    message: string
-    details?: unknown
-  }
-}
 
 /**
  * Base interface for all database entities
@@ -91,8 +80,8 @@ export abstract class BaseDB<T extends BaseEntity> {
   /**
    * Create a new record
    */
-  async create(data: Omit<T, 'id' | 'createdAt' | 'updatedAt'>): Promise<T> {
-    try {
+  async create(data: Omit<T, 'id' | 'createdAt' | 'updatedAt'>): Promise<Result<T, DatabaseError>> {
+    return tryCatch(async () => {
       const record = this.addTimestamps(data) as T
       const validatedRecord = this.validateData(record)
       
@@ -106,16 +95,14 @@ export abstract class BaseDB<T extends BaseEntity> {
       
       await this.writeFile(filePath, validatedRecord)
       return validatedRecord
-    } catch (error) {
-      throw this.handleError('create', error)
-    }
+    })
   }
 
   /**
    * Find a record by ID
    */
-  async findById(id: string): Promise<T | null> {
-    try {
+  async findById(id: string): Promise<Result<T | null, DatabaseError>> {
+    return tryCatch(async () => {
       const filePath = this.getFilePath(id)
       
       if (!(await this.fileExists(filePath))) {
@@ -124,21 +111,20 @@ export abstract class BaseDB<T extends BaseEntity> {
       
       const data = await this.readFile(filePath)
       return this.validateData(data)
-    } catch (error) {
-      throw this.handleError('findById', error)
-    }
+    })
   }
 
   /**
    * Find all records with optional filtering
    */
-  async findAll(filters?: Record<string, unknown>): Promise<T[]> {
-    try {
+  async findAll(filters?: Partial<Record<keyof T, unknown>>): Promise<Result<T[], DatabaseError>> {
+    return tryCatch(async () => {
       await this.ensureDirectoryExists()
       const files = await fs.readdir(this.dataPath)
       const jsonFiles = files.filter(file => file.endsWith('.json'))
       
       const records: T[] = []
+      const errors: string[] = []
       
       for (const file of jsonFiles) {
         try {
@@ -150,32 +136,46 @@ export abstract class BaseDB<T extends BaseEntity> {
             records.push(record)
           }
         } catch (error) {
-          // Log warning but continue processing other files
-          console.warn(`Failed to process file ${file}:`, error)
+          const errorMsg = `Failed to process file ${file}: ${error instanceof Error ? error.message : 'Unknown error'}`
+          errors.push(errorMsg)
+          console.warn(errorMsg, error)
         }
+      }
+      
+      // If too many files failed to process, this might indicate a systemic issue
+      if (errors.length > 0 && errors.length >= jsonFiles.length / 2) {
+        throw new DatabaseError(`Too many file processing errors (${errors.length}/${jsonFiles.length}): ${errors.slice(0, 3).join(', ')}${errors.length > 3 ? '...' : ''}`)
       }
       
       return records.sort((a, b) => 
         new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
       )
-    } catch (error) {
-      throw this.handleError('findAll', error)
-    }
+    })
   }
 
   /**
    * Update an existing record
    */
-  async update(id: string, updateData: Partial<Omit<T, 'id' | 'createdAt'>>): Promise<T> {
-    try {
-      const existing = await this.findById(id)
-      if (!existing) {
+  async update(id: string, updateData: Partial<Omit<T, 'id' | 'createdAt'>>): Promise<Result<T, DatabaseError>> {
+    return tryCatch(async () => {
+      const existingResult = await this.findById(id)
+      if (existingResult.error) {
+        throw existingResult.error
+      }
+      
+      if (!existingResult.data) {
         throw new RecordNotFoundError(id, this.entityName)
       }
       
+      const existing = existingResult.data
+      
       // Create backup before update if enabled
       if (this.enableAutoBackup) {
-        await this.backup(id)
+        const backupResult = await this.backup(id)
+        if (backupResult.error) {
+          console.warn(`Failed to create backup for ${id}: ${backupResult.error.message}`, backupResult.error)
+          // Continue with update even if backup fails, but log the issue
+        }
       }
       
       const updatedRecord = {
@@ -190,24 +190,29 @@ export abstract class BaseDB<T extends BaseEntity> {
       
       await this.writeFile(filePath, validatedRecord)
       return validatedRecord
-    } catch (error) {
-      throw this.handleError('update', error)
-    }
+    })
   }
 
   /**
    * Delete a record (soft delete - move to archive)
    */
-  async delete(id: string): Promise<void> {
-    try {
-      const existing = await this.findById(id)
-      if (!existing) {
+  async delete(id: string): Promise<Result<void, DatabaseError>> {
+    return tryCatch(async () => {
+      const existingResult = await this.findById(id)
+      if (existingResult.error) {
+        throw existingResult.error
+      }
+      
+      if (!existingResult.data) {
         throw new RecordNotFoundError(id, this.entityName)
       }
       
       // Create backup before delete if enabled
       if (this.enableAutoBackup) {
-        await this.backup(id)
+        const backupResult = await this.backup(id)
+        if (backupResult.error) {
+          throw new DatabaseError(`Failed to create backup before deletion: ${backupResult.error.message}`, backupResult.error)
+        }
       }
       
       const filePath = this.getFilePath(id)
@@ -218,38 +223,44 @@ export abstract class BaseDB<T extends BaseEntity> {
       
       // Move file to archive instead of deleting
       await fs.rename(filePath, archivePath)
-    } catch (error) {
-      throw this.handleError('delete', error)
-    }
+    })
   }
 
   /**
    * Create backup of a record
    */
-  async backup(id: string): Promise<void> {
-    try {
-      const existing = await this.findById(id)
-      if (!existing) {
+  async backup(id: string): Promise<Result<void, DatabaseError>> {
+    return tryCatch(async () => {
+      const existingResult = await this.findById(id)
+      if (existingResult.error) {
+        throw existingResult.error
+      }
+      
+      if (!existingResult.data) {
         throw new RecordNotFoundError(id, this.entityName)
       }
       
+      const existing = existingResult.data
       const backupPath = this.getBackupPath(id)
       await this.ensureDirectoryExists(dirname(backupPath))
       
       await this.writeFile(backupPath, existing)
       
-      // Clean up old backups
-      await this.cleanupOldBackups(id)
-    } catch (error) {
-      throw this.handleError('backup', error)
-    }
+      // Clean up old backups - don't fail the backup if cleanup fails
+      try {
+        await this.cleanupOldBackups(id)
+      } catch (cleanupError) {
+        console.warn(`Failed to cleanup old backups for ${id}:`, cleanupError)
+        // Continue - backup was successful even if cleanup failed
+      }
+    })
   }
 
   /**
    * Restore a record from backup
    */
-  async restore(id: string, timestamp?: string): Promise<T> {
-    try {
+  async restore(id: string, timestamp?: string): Promise<Result<T, DatabaseError>> {
+    return tryCatch(async () => {
       let backupPath: string
       
       if (timestamp) {
@@ -282,25 +293,33 @@ export abstract class BaseDB<T extends BaseEntity> {
       await this.writeFile(mainPath, validatedRecord)
       
       return validatedRecord
-    } catch (error) {
-      throw this.handleError('restore', error)
-    }
+    })
   }
 
   /**
    * Get the count of records matching filters
    */
-  async count(filters?: Record<string, unknown>): Promise<number> {
-    const records = await this.findAll(filters)
-    return records.length
+  async count(filters?: Partial<Record<keyof T, unknown>>): Promise<Result<number, DatabaseError>> {
+    return tryCatch(async () => {
+      const recordsResult = await this.findAll(filters)
+      if (recordsResult.error) {
+        throw recordsResult.error
+      }
+      return recordsResult.data.length
+    })
   }
 
   /**
    * Check if a record exists
    */
-  async exists(id: string): Promise<boolean> {
-    const record = await this.findById(id)
-    return record !== null
+  async exists(id: string): Promise<Result<boolean, DatabaseError>> {
+    return tryCatch(async () => {
+      const recordResult = await this.findById(id)
+      if (recordResult.error) {
+        throw recordResult.error
+      }
+      return recordResult.data !== null
+    })
   }
 
   // Protected utility methods
@@ -316,7 +335,15 @@ export abstract class BaseDB<T extends BaseEntity> {
    * Get the file path for a record
    */
   protected getFilePath(id: string): string {
-    return join(this.dataPath, `${id}.json`)
+    // Sanitize ID to prevent path traversal attacks
+    const sanitizedId = id.replace(/[^a-zA-Z0-9-_]/g, '')
+    if (!sanitizedId || sanitizedId !== id) {
+      throw new DatabaseError(`Invalid ID format: ID must contain only alphanumeric characters, hyphens, and underscores`)
+    }
+    if (sanitizedId.length > 255) {
+      throw new DatabaseError('ID too long: maximum 255 characters allowed')
+    }
+    return join(this.dataPath, `${sanitizedId}.json`)
   }
 
   /**
@@ -413,13 +440,13 @@ export abstract class BaseDB<T extends BaseEntity> {
   /**
    * Check if record matches filters
    */
-  protected matchesFilters(record: T, filters?: Record<string, unknown>): boolean {
+  protected matchesFilters(record: T, filters?: Partial<Record<keyof T, unknown>>): boolean {
     if (!filters || Object.keys(filters).length === 0) {
       return true
     }
 
     return Object.entries(filters).every(([key, value]) => {
-      const recordValue = (record as Record<string, unknown>)[key]
+      const recordValue = record[key as keyof T]
       
       // Handle array filters (e.g., status: ['active', 'completed'])
       if (Array.isArray(value)) {
@@ -429,6 +456,13 @@ export abstract class BaseDB<T extends BaseEntity> {
       // Handle string filters with partial matching
       if (typeof value === 'string' && typeof recordValue === 'string') {
         return recordValue.toLowerCase().includes(value.toLowerCase())
+      }
+      
+      // Handle number range filters {min: number, max: number}
+      if (typeof value === 'object' && value !== null && 'min' in value && 'max' in value) {
+        const numValue = recordValue as number
+        const range = value as { min: number; max: number }
+        return numValue >= range.min && numValue <= range.max
       }
       
       // Exact match for other types

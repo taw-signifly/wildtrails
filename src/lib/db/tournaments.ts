@@ -1,5 +1,5 @@
-import { BaseDB, DatabaseConfig } from './base'
-import { Tournament, TournamentStatus, TournamentType, GameFormat, TournamentFormData, TournamentStats } from '@/types'
+import { BaseDB, DatabaseConfig, DatabaseError } from './base'
+import { Tournament, TournamentStatus, TournamentType, GameFormat, TournamentFormData, TournamentStats, Result, tryCatch } from '@/types'
 import { TournamentSchema, TournamentFormDataSchema } from '@/lib/validation/tournament'
 
 /**
@@ -20,161 +20,209 @@ export class TournamentDB extends BaseDB<Tournament> {
   /**
    * Create a new tournament from form data
    */
-  async create(formData: TournamentFormData): Promise<Tournament> {
-    // Validate form data
-    const validatedFormData = TournamentFormDataSchema.parse(formData)
-    
-    // Convert form data to tournament entity
-    const tournamentData = {
-      ...validatedFormData,
-      status: 'setup' as TournamentStatus,
-      currentPlayers: 0,
-      endDate: undefined,
-      settings: {
-        allowLateRegistration: true,
-        automaticBracketGeneration: true,
-        requireCheckin: true,
-        courtAssignmentMode: 'automatic' as const,
-        scoringMode: 'self-report' as const,
-        realTimeUpdates: true,
-        allowSpectators: true,
-        ...validatedFormData.settings
-      },
-      stats: {
-        totalMatches: 0,
-        completedMatches: 0,
-        averageMatchDuration: 0,
-        totalEnds: 0,
-        highestScore: 0,
-        averageScore: 0
+  async create(formData: TournamentFormData): Promise<Result<Tournament, DatabaseError>> {
+    return tryCatch(async () => {
+      // Validate form data
+      const validatedFormData = TournamentFormDataSchema.parse(formData)
+      
+      // Convert form data to tournament entity
+      const tournamentData = {
+        ...validatedFormData,
+        status: 'setup' as TournamentStatus,
+        currentPlayers: 0,
+        endDate: undefined,
+        settings: {
+          allowLateRegistration: true,
+          automaticBracketGeneration: true,
+          requireCheckin: true,
+          courtAssignmentMode: 'automatic' as const,
+          scoringMode: 'self-report' as const,
+          realTimeUpdates: true,
+          allowSpectators: true,
+          ...validatedFormData.settings
+        },
+        stats: {
+          totalMatches: 0,
+          completedMatches: 0,
+          averageMatchDuration: 0,
+          totalEnds: 0,
+          highestScore: 0,
+          averageScore: 0
+        }
       }
-    }
 
-    return super.create(tournamentData)
+      const result = await super.create(tournamentData)
+      if (result.error) {
+        throw result.error
+      }
+      return result.data
+    })
   }
 
   /**
    * Find tournaments by status
    */
-  async findByStatus(status: TournamentStatus): Promise<Tournament[]> {
+  async findByStatus(status: TournamentStatus): Promise<Result<Tournament[], DatabaseError>> {
     return this.findAll({ status })
   }
 
   /**
    * Find tournaments by type
    */
-  async findByType(type: TournamentType): Promise<Tournament[]> {
+  async findByType(type: TournamentType): Promise<Result<Tournament[], DatabaseError>> {
     return this.findAll({ type })
   }
 
   /**
    * Find tournaments by organizer
    */
-  async findByOrganizer(organizer: string): Promise<Tournament[]> {
+  async findByOrganizer(organizer: string): Promise<Result<Tournament[], DatabaseError>> {
     return this.findAll({ organizer })
   }
 
   /**
    * Find tournaments by format (singles, doubles, triples)
    */
-  async findByFormat(format: GameFormat): Promise<Tournament[]> {
+  async findByFormat(format: GameFormat): Promise<Result<Tournament[], DatabaseError>> {
     return this.findAll({ format })
   }
 
   /**
    * Find active tournaments (status: 'active')
    */
-  async findActive(): Promise<Tournament[]> {
+  async findActive(): Promise<Result<Tournament[], DatabaseError>> {
     return this.findByStatus('active')
   }
 
   /**
    * Find completed tournaments
    */
-  async findCompleted(): Promise<Tournament[]> {
-    // Look in both active and completed directories
-    const activeCompleted = await this.findByStatus('completed')
-    
-    // Also check the completed tournaments directory
-    const completedDB = new TournamentDB({ 
-      dataPath: 'data/tournaments/completed' 
+  async findCompleted(): Promise<Result<Tournament[], DatabaseError>> {
+    return tryCatch(async () => {
+      // Look in both active and completed directories
+      const activeCompletedResult = await this.findByStatus('completed')
+      if (activeCompletedResult.error) {
+        throw activeCompletedResult.error
+      }
+      const activeCompleted = activeCompletedResult.data
+      
+      // Also check the completed tournaments directory
+      const completedDB = new TournamentDB({ 
+        dataPath: 'data/tournaments/completed' 
+      })
+      const archivedCompletedResult = await completedDB.findAll()
+      if (archivedCompletedResult.error) {
+        throw archivedCompletedResult.error
+      }
+      const archivedCompleted = archivedCompletedResult.data
+      
+      // Combine and remove duplicates
+      const allCompleted = [...activeCompleted, ...archivedCompleted]
+      const uniqueCompleted = allCompleted.filter((tournament, index, self) => 
+        index === self.findIndex(t => t.id === tournament.id)
+      )
+      
+      return uniqueCompleted
     })
-    const archivedCompleted = await completedDB.findAll()
-    
-    // Combine and remove duplicates
-    const allCompleted = [...activeCompleted, ...archivedCompleted]
-    const uniqueCompleted = allCompleted.filter((tournament, index, self) => 
-      index === self.findIndex(t => t.id === tournament.id)
-    )
-    
-    return uniqueCompleted
   }
 
   /**
    * Find upcoming tournaments (status: 'setup' and startDate in the future)
    */
-  async findUpcoming(): Promise<Tournament[]> {
-    const setupTournaments = await this.findByStatus('setup')
-    const now = new Date()
-    
-    return setupTournaments.filter(tournament => 
-      new Date(tournament.startDate) > now
-    )
+  async findUpcoming(): Promise<Result<Tournament[], DatabaseError>> {
+    return tryCatch(async () => {
+      const setupTournamentsResult = await this.findByStatus('setup')
+      if (setupTournamentsResult.error) {
+        throw setupTournamentsResult.error
+      }
+      const setupTournaments = setupTournamentsResult.data
+      const now = new Date()
+      
+      return setupTournaments.filter(tournament => 
+        new Date(tournament.startDate) > now
+      )
+    })
   }
 
   /**
    * Start a tournament (change status from 'setup' to 'active')
    */
-  async startTournament(id: string): Promise<Tournament> {
-    const tournament = await this.findById(id)
-    if (!tournament) {
-      throw new Error(`Tournament with ID ${id} not found`)
-    }
+  async startTournament(id: string): Promise<Result<Tournament, DatabaseError>> {
+    return tryCatch(async () => {
+      const tournamentResult = await this.findById(id)
+      if (tournamentResult.error) {
+        throw tournamentResult.error
+      }
+      
+      if (!tournamentResult.data) {
+        throw new DatabaseError(`Tournament with ID ${id} not found`)
+      }
 
-    if (tournament.status !== 'setup') {
-      throw new Error(`Tournament is not in setup status. Current status: ${tournament.status}`)
-    }
+      const tournament = tournamentResult.data
+      if (tournament.status !== 'setup') {
+        throw new DatabaseError(`Tournament is not in setup status. Current status: ${tournament.status}`)
+      }
 
-    if (tournament.currentPlayers < 4) {
-      throw new Error(`Minimum 4 players required to start tournament. Current: ${tournament.currentPlayers}`)
-    }
+      if (tournament.currentPlayers < 4) {
+        throw new DatabaseError(`Minimum 4 players required to start tournament. Current: ${tournament.currentPlayers}`)
+      }
 
-    return this.update(id, { 
-      status: 'active',
-      startDate: new Date().toISOString() // Update to actual start time
+      const updateResult = await this.update(id, { 
+        status: 'active',
+        startDate: new Date().toISOString() // Update to actual start time
+      })
+      
+      if (updateResult.error) {
+        throw updateResult.error
+      }
+      
+      return updateResult.data
     })
   }
 
   /**
    * Complete a tournament (change status to 'completed' and move to completed directory)
    */
-  async completeTournament(id: string, finalStats?: Partial<TournamentStats>): Promise<Tournament> {
-    const tournament = await this.findById(id)
-    if (!tournament) {
-      throw new Error(`Tournament with ID ${id} not found`)
-    }
+  async completeTournament(id: string, finalStats?: Partial<TournamentStats>): Promise<Result<Tournament, DatabaseError>> {
+    return tryCatch(async () => {
+      const tournamentResult = await this.findById(id)
+      if (tournamentResult.error) {
+        throw tournamentResult.error
+      }
+      
+      if (!tournamentResult.data) {
+        throw new DatabaseError(`Tournament with ID ${id} not found`)
+      }
 
-    if (tournament.status !== 'active') {
-      throw new Error(`Tournament is not active. Current status: ${tournament.status}`)
-    }
+      const tournament = tournamentResult.data
+      if (tournament.status !== 'active') {
+        throw new DatabaseError(`Tournament is not active. Current status: ${tournament.status}`)
+      }
 
-    // Update tournament with final stats and completion
-    const updatedTournament = await this.update(id, { 
-      status: 'completed',
-      endDate: new Date().toISOString(),
-      stats: finalStats ? { ...tournament.stats, ...finalStats } : tournament.stats
+      // Update tournament with final stats and completion
+      const updateResult = await this.update(id, { 
+        status: 'completed',
+        endDate: new Date().toISOString(),
+        stats: finalStats ? { ...tournament.stats, ...finalStats } : tournament.stats
+      })
+
+      if (updateResult.error) {
+        throw updateResult.error
+      }
+
+      const updatedTournament = updateResult.data
+
+      // Move to completed tournaments directory
+      await this.moveToCompleted(updatedTournament)
+
+      return updatedTournament
     })
-
-    // Move to completed tournaments directory
-    await this.moveToCompleted(updatedTournament)
-
-    return updatedTournament
   }
 
   /**
    * Cancel a tournament
    */
-  async cancelTournament(id: string): Promise<Tournament> {
+  async cancelTournament(id: string): Promise<Result<Tournament, DatabaseError>> {
     return this.update(id, { 
       status: 'cancelled',
       endDate: new Date().toISOString()
@@ -185,22 +233,35 @@ export class TournamentDB extends BaseDB<Tournament> {
    * Add a player to tournament
    */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async addPlayer(tournamentId: string, _playerId: string): Promise<Tournament> {
-    const tournament = await this.findById(tournamentId)
-    if (!tournament) {
-      throw new Error(`Tournament with ID ${tournamentId} not found`)
-    }
+  async addPlayer(tournamentId: string, _playerId: string): Promise<Result<Tournament, DatabaseError>> {
+    return tryCatch(async () => {
+      const tournamentResult = await this.findById(tournamentId)
+      if (tournamentResult.error) {
+        throw tournamentResult.error
+      }
+      
+      if (!tournamentResult.data) {
+        throw new DatabaseError(`Tournament with ID ${tournamentId} not found`)
+      }
 
-    if (tournament.currentPlayers >= tournament.maxPlayers) {
-      throw new Error(`Tournament is full. Maximum players: ${tournament.maxPlayers}`)
-    }
+      const tournament = tournamentResult.data
+      if (tournament.currentPlayers >= tournament.maxPlayers) {
+        throw new DatabaseError(`Tournament is full. Maximum players: ${tournament.maxPlayers}`)
+      }
 
-    if (tournament.status !== 'setup' && !tournament.settings.allowLateRegistration) {
-      throw new Error('Late registration is not allowed for this tournament')
-    }
+      if (tournament.status !== 'setup' && !tournament.settings.allowLateRegistration) {
+        throw new DatabaseError('Late registration is not allowed for this tournament')
+      }
 
-    return this.update(tournamentId, {
-      currentPlayers: tournament.currentPlayers + 1
+      const updateResult = await this.update(tournamentId, {
+        currentPlayers: tournament.currentPlayers + 1
+      })
+      
+      if (updateResult.error) {
+        throw updateResult.error
+      }
+      
+      return updateResult.data
     })
   }
 
@@ -208,150 +269,206 @@ export class TournamentDB extends BaseDB<Tournament> {
    * Remove a player from tournament
    */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async removePlayer(tournamentId: string, _playerId: string): Promise<Tournament> {
-    const tournament = await this.findById(tournamentId)
-    if (!tournament) {
-      throw new Error(`Tournament with ID ${tournamentId} not found`)
-    }
+  async removePlayer(tournamentId: string, _playerId: string): Promise<Result<Tournament, DatabaseError>> {
+    return tryCatch(async () => {
+      const tournamentResult = await this.findById(tournamentId)
+      if (tournamentResult.error) {
+        throw tournamentResult.error
+      }
+      
+      if (!tournamentResult.data) {
+        throw new DatabaseError(`Tournament with ID ${tournamentId} not found`)
+      }
 
-    if (tournament.currentPlayers === 0) {
-      throw new Error('No players to remove from tournament')
-    }
+      const tournament = tournamentResult.data
+      if (tournament.currentPlayers === 0) {
+        throw new DatabaseError('No players to remove from tournament')
+      }
 
-    if (tournament.status === 'active') {
-      throw new Error('Cannot remove players from active tournament')
-    }
+      if (tournament.status === 'active') {
+        throw new DatabaseError('Cannot remove players from active tournament')
+      }
 
-    return this.update(tournamentId, {
-      currentPlayers: Math.max(0, tournament.currentPlayers - 1)
+      const updateResult = await this.update(tournamentId, {
+        currentPlayers: Math.max(0, tournament.currentPlayers - 1)
+      })
+      
+      if (updateResult.error) {
+        throw updateResult.error
+      }
+      
+      return updateResult.data
     })
   }
 
   /**
    * Update tournament statistics
    */
-  async updateStats(id: string, stats: Partial<TournamentStats>): Promise<Tournament> {
-    const tournament = await this.findById(id)
-    if (!tournament) {
-      throw new Error(`Tournament with ID ${id} not found`)
-    }
+  async updateStats(id: string, stats: Partial<TournamentStats>): Promise<Result<Tournament, DatabaseError>> {
+    return tryCatch(async () => {
+      const tournamentResult = await this.findById(id)
+      if (tournamentResult.error) {
+        throw tournamentResult.error
+      }
+      
+      if (!tournamentResult.data) {
+        throw new DatabaseError(`Tournament with ID ${id} not found`)
+      }
 
-    const updatedStats = {
-      ...tournament.stats,
-      ...stats
-    }
+      const tournament = tournamentResult.data
+      const updatedStats = {
+        ...tournament.stats,
+        ...stats
+      }
 
-    return this.update(id, { stats: updatedStats })
+      const updateResult = await this.update(id, { stats: updatedStats })
+      if (updateResult.error) {
+        throw updateResult.error
+      }
+      
+      return updateResult.data
+    })
   }
 
   /**
    * Get tournament statistics summary
    */
-  async getStatsSummary(): Promise<{
+  async getStatsSummary(): Promise<Result<{
     total: number
     byStatus: Record<TournamentStatus, number>
     byType: Record<TournamentType, number>
     byFormat: Record<GameFormat, number>
     totalPlayers: number
     averagePlayersPerTournament: number
-  }> {
-    const tournaments = await this.findAll()
-    
-    const summary = {
-      total: tournaments.length,
-      byStatus: {} as Record<TournamentStatus, number>,
-      byType: {} as Record<TournamentType, number>,
-      byFormat: {} as Record<GameFormat, number>,
-      totalPlayers: 0,
-      averagePlayersPerTournament: 0
-    }
+  }, DatabaseError>> {
+    return tryCatch(async () => {
+      const tournamentsResult = await this.findAll()
+      if (tournamentsResult.error) {
+        throw tournamentsResult.error
+      }
+      const tournaments = tournamentsResult.data
+      
+      const summary = {
+        total: tournaments.length,
+        byStatus: {} as Record<TournamentStatus, number>,
+        byType: {} as Record<TournamentType, number>,
+        byFormat: {} as Record<GameFormat, number>,
+        totalPlayers: 0,
+        averagePlayersPerTournament: 0
+      }
 
-    tournaments.forEach(tournament => {
-      // Count by status
-      summary.byStatus[tournament.status] = (summary.byStatus[tournament.status] || 0) + 1
-      
-      // Count by type
-      summary.byType[tournament.type] = (summary.byType[tournament.type] || 0) + 1
-      
-      // Count by format
-      summary.byFormat[tournament.format] = (summary.byFormat[tournament.format] || 0) + 1
-      
-      // Total players
-      summary.totalPlayers += tournament.currentPlayers
+      tournaments.forEach(tournament => {
+        // Count by status
+        summary.byStatus[tournament.status] = (summary.byStatus[tournament.status] || 0) + 1
+        
+        // Count by type
+        summary.byType[tournament.type] = (summary.byType[tournament.type] || 0) + 1
+        
+        // Count by format
+        summary.byFormat[tournament.format] = (summary.byFormat[tournament.format] || 0) + 1
+        
+        // Total players
+        summary.totalPlayers += tournament.currentPlayers
+      })
+
+      // Calculate average
+      summary.averagePlayersPerTournament = tournaments.length > 0 
+        ? summary.totalPlayers / tournaments.length 
+        : 0
+
+      return summary
     })
-
-    // Calculate average
-    summary.averagePlayersPerTournament = tournaments.length > 0 
-      ? summary.totalPlayers / tournaments.length 
-      : 0
-
-    return summary
   }
 
   /**
    * Search tournaments by name or description
    */
-  async search(query: string): Promise<Tournament[]> {
-    const tournaments = await this.findAll()
-    const lowerQuery = query.toLowerCase()
-    
-    return tournaments.filter(tournament => 
-      tournament.name.toLowerCase().includes(lowerQuery) ||
-      (tournament.description && tournament.description.toLowerCase().includes(lowerQuery)) ||
-      tournament.organizer.toLowerCase().includes(lowerQuery) ||
-      (tournament.location && tournament.location.toLowerCase().includes(lowerQuery))
-    )
+  async search(query: string): Promise<Result<Tournament[], DatabaseError>> {
+    return tryCatch(async () => {
+      const tournamentsResult = await this.findAll()
+      if (tournamentsResult.error) {
+        throw tournamentsResult.error
+      }
+      const tournaments = tournamentsResult.data
+      const lowerQuery = query.toLowerCase()
+      
+      return tournaments.filter(tournament => 
+        tournament.name.toLowerCase().includes(lowerQuery) ||
+        (tournament.description && tournament.description.toLowerCase().includes(lowerQuery)) ||
+        tournament.organizer.toLowerCase().includes(lowerQuery) ||
+        (tournament.location && tournament.location.toLowerCase().includes(lowerQuery))
+      )
+    })
   }
 
   /**
    * Get tournaments in date range
    */
-  async findInDateRange(startDate: Date, endDate: Date): Promise<Tournament[]> {
-    const tournaments = await this.findAll()
-    
-    return tournaments.filter(tournament => {
-      const tournamentStart = new Date(tournament.startDate)
-      const tournamentEnd = tournament.endDate ? new Date(tournament.endDate) : null
+  async findInDateRange(startDate: Date, endDate: Date): Promise<Result<Tournament[], DatabaseError>> {
+    return tryCatch(async () => {
+      const tournamentsResult = await this.findAll()
+      if (tournamentsResult.error) {
+        throw tournamentsResult.error
+      }
+      const tournaments = tournamentsResult.data
       
-      // Tournament starts within range or is ongoing during the range
-      return (
-        (tournamentStart >= startDate && tournamentStart <= endDate) ||
-        (tournamentEnd && tournamentEnd >= startDate && tournamentEnd <= endDate) ||
-        (tournamentStart <= startDate && (!tournamentEnd || tournamentEnd >= endDate))
-      )
+      return tournaments.filter(tournament => {
+        const tournamentStart = new Date(tournament.startDate)
+        const tournamentEnd = tournament.endDate ? new Date(tournament.endDate) : null
+        
+        // Tournament starts within range or is ongoing during the range
+        return (
+          (tournamentStart >= startDate && tournamentStart <= endDate) ||
+          (tournamentEnd && tournamentEnd >= startDate && tournamentEnd <= endDate) ||
+          (tournamentStart <= startDate && (!tournamentEnd || tournamentEnd >= endDate))
+        )
+      })
     })
   }
 
   /**
    * Create tournament from template
    */
-  async createFromTemplate(templateId: string, overrides: Partial<TournamentFormData>): Promise<Tournament> {
-    // Load template from templates directory
-    const templateDB = new TournamentDB({ 
-      dataPath: 'data/tournaments/templates' 
+  async createFromTemplate(templateId: string, overrides: Partial<TournamentFormData>): Promise<Result<Tournament, DatabaseError>> {
+    return tryCatch(async () => {
+      // Load template from templates directory
+      const templateDB = new TournamentDB({ 
+        dataPath: 'data/tournaments/templates' 
+      })
+      
+      const templateResult = await templateDB.findById(templateId)
+      if (templateResult.error) {
+        throw templateResult.error
+      }
+      
+      if (!templateResult.data) {
+        throw new DatabaseError(`Tournament template with ID ${templateId} not found`)
+      }
+
+      const template = templateResult.data
+
+      // Create tournament data from template with overrides
+      const tournamentData: TournamentFormData = {
+        name: overrides.name || `${template.name} - ${new Date().toLocaleDateString()}`,
+        type: overrides.type || template.type,
+        format: overrides.format || template.format,
+        maxPoints: overrides.maxPoints || template.maxPoints,
+        shortForm: overrides.shortForm || template.shortForm,
+        startDate: overrides.startDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Default to next week
+        description: overrides.description || template.description,
+        location: overrides.location || template.location,
+        organizer: overrides.organizer || template.organizer,
+        maxPlayers: overrides.maxPlayers || template.maxPlayers,
+        settings: { ...template.settings, ...overrides.settings }
+      }
+
+      const createResult = await this.create(tournamentData)
+      if (createResult.error) {
+        throw createResult.error
+      }
+      
+      return createResult.data
     })
-    
-    const template = await templateDB.findById(templateId)
-    if (!template) {
-      throw new Error(`Tournament template with ID ${templateId} not found`)
-    }
-
-    // Create tournament data from template with overrides
-    const tournamentData: TournamentFormData = {
-      name: overrides.name || `${template.name} - ${new Date().toLocaleDateString()}`,
-      type: overrides.type || template.type,
-      format: overrides.format || template.format,
-      maxPoints: overrides.maxPoints || template.maxPoints,
-      shortForm: overrides.shortForm || template.shortForm,
-      startDate: overrides.startDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Default to next week
-      description: overrides.description || template.description,
-      location: overrides.location || template.location,
-      organizer: overrides.organizer || template.organizer,
-      maxPlayers: overrides.maxPlayers || template.maxPlayers,
-      settings: { ...template.settings, ...overrides.settings }
-    }
-
-    return this.create(tournamentData)
   }
 
   // Private helper methods
@@ -377,8 +494,9 @@ export class TournamentDB extends BaseDB<Tournament> {
         await this.delete(tournament.id)
       }
     } catch (error) {
-      console.warn(`Failed to move tournament ${tournament.id} to completed directory:`, error)
-      // Don't throw error as the tournament is already updated
+      const errorMsg = `Failed to move tournament ${tournament.id} to completed directory: ${error instanceof Error ? error.message : 'Unknown error'}`
+      console.warn(errorMsg, error)
+      // Don't throw error as the tournament is already updated - this is just an organizational operation
     }
   }
 }

@@ -1,5 +1,5 @@
-import { BaseDB, DatabaseConfig, RecordNotFoundError } from './base'
-import { Match, MatchStatus, Score, End, BracketType, Team } from '@/types'
+import { BaseDB, DatabaseConfig, RecordNotFoundError, DatabaseError } from './base'
+import { Match, MatchStatus, Score, End, BracketType, Team, Result, tryCatch } from '@/types'
 import { MatchSchema, MatchFormDataSchema, ScoreSchema, EndSchema } from '@/lib/validation/match'
 
 /**
@@ -20,409 +20,516 @@ export class MatchDB extends BaseDB<Match> {
   /**
    * Create a new match
    */
-  async create(matchData: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>): Promise<Match> {
-    // Initialize default match data
-    const fullMatchData = {
-      ...matchData,
-      status: 'scheduled' as MatchStatus,
-      score: {
-        team1: 0,
-        team2: 0,
-        isComplete: false
-      },
-      ends: [],
-      duration: undefined,
-      winner: undefined,
-      startTime: undefined,
-      endTime: undefined
-    }
+  async create(matchData: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>): Promise<Result<Match, DatabaseError>> {
+    return tryCatch(async () => {
+      // Initialize default match data
+      const fullMatchData = {
+        ...matchData,
+        status: 'scheduled' as MatchStatus,
+        score: {
+          team1: 0,
+          team2: 0,
+          isComplete: false
+        },
+        ends: [],
+        duration: undefined,
+        winner: undefined,
+        startTime: undefined,
+        endTime: undefined
+      }
 
-    return super.create(fullMatchData)
+      const result = await super.create(fullMatchData)
+      if (result.error) {
+        throw result.error
+      }
+      return result.data
+    })
   }
 
   /**
    * Find matches by tournament
    */
-  async findByTournament(tournamentId: string): Promise<Match[]> {
+  async findByTournament(tournamentId: string): Promise<Result<Match[], DatabaseError>> {
     return this.findAll({ tournamentId })
   }
 
   /**
    * Find matches by player
    */
-  async findByPlayer(playerId: string): Promise<Match[]> {
-    const matches = await this.findAll()
-    return matches.filter(match => 
-      match.team1.players.some(p => p.id === playerId) ||
-      match.team2.players.some(p => p.id === playerId)
-    )
+  async findByPlayer(playerId: string): Promise<Result<Match[], DatabaseError>> {
+    return tryCatch(async () => {
+      const matchesResult = await this.findAll()
+      if (matchesResult.error) {
+        throw matchesResult.error
+      }
+      const matches = matchesResult.data
+      return matches.filter(match => 
+        match.team1.players.some(p => p.id === playerId) ||
+        match.team2.players.some(p => p.id === playerId)
+      )
+    })
   }
 
   /**
    * Find matches by team
    */
-  async findByTeam(teamId: string): Promise<Match[]> {
-    return this.findAll({ 
-      $or: [
-        { 'team1.id': teamId },
-        { 'team2.id': teamId }
-      ]
+  async findByTeam(teamId: string): Promise<Result<Match[], DatabaseError>> {
+    return tryCatch(async () => {
+      const matchesResult = await this.findAll()
+      if (matchesResult.error) {
+        throw matchesResult.error
+      }
+      const matches = matchesResult.data
+      return matches.filter(match => 
+        match.team1.id === teamId || match.team2.id === teamId
+      )
     })
   }
 
   /**
    * Find matches by status
    */
-  async findByStatus(status: MatchStatus): Promise<Match[]> {
+  async findByStatus(status: MatchStatus): Promise<Result<Match[], DatabaseError>> {
     return this.findAll({ status })
   }
 
   /**
    * Find matches by round
    */
-  async findByRound(tournamentId: string, round: number): Promise<Match[]> {
+  async findByRound(tournamentId: string, round: number): Promise<Result<Match[], DatabaseError>> {
     return this.findAll({ tournamentId, round })
   }
 
   /**
    * Find matches by bracket type
    */
-  async findByBracketType(tournamentId: string, bracketType: BracketType): Promise<Match[]> {
+  async findByBracketType(tournamentId: string, bracketType: BracketType): Promise<Result<Match[], DatabaseError>> {
     return this.findAll({ tournamentId, bracketType })
   }
 
   /**
    * Find matches by court
    */
-  async findByCourt(courtId: string): Promise<Match[]> {
+  async findByCourt(courtId: string): Promise<Result<Match[], DatabaseError>> {
     return this.findAll({ courtId })
   }
 
   /**
    * Find active matches
    */
-  async findActive(): Promise<Match[]> {
+  async findActive(): Promise<Result<Match[], DatabaseError>> {
     return this.findByStatus('active')
   }
 
   /**
    * Find scheduled matches
    */
-  async findScheduled(): Promise<Match[]> {
+  async findScheduled(): Promise<Result<Match[], DatabaseError>> {
     return this.findByStatus('scheduled')
   }
 
   /**
    * Find completed matches
    */
-  async findCompleted(): Promise<Match[]> {
+  async findCompleted(): Promise<Result<Match[], DatabaseError>> {
     return this.findByStatus('completed')
   }
 
   /**
    * Find matches in date range
    */
-  async findInDateRange(startDate: Date, endDate: Date): Promise<Match[]> {
-    const matches = await this.findAll()
-    
-    return matches.filter(match => {
-      const matchDate = match.scheduledTime || match.startTime
-      if (!matchDate) return false
+  async findInDateRange(startDate: Date, endDate: Date): Promise<Result<Match[], DatabaseError>> {
+    return tryCatch(async () => {
+      const matchesResult = await this.findAll()
+      if (matchesResult.error) {
+        throw matchesResult.error
+      }
+      const matches = matchesResult.data
       
-      const date = new Date(matchDate)
-      return date >= startDate && date <= endDate
+      return matches.filter(match => {
+        const matchDate = match.scheduledTime || match.startTime
+        if (!matchDate) return false
+        
+        const date = new Date(matchDate)
+        return date >= startDate && date <= endDate
+      })
     })
   }
 
   /**
    * Start a match (change status from scheduled to active)
    */
-  async startMatch(id: string, courtId?: string): Promise<Match> {
-    const match = await this.findById(id)
-    if (!match) {
-      throw new RecordNotFoundError(id, this.entityName)
-    }
+  async startMatch(id: string, courtId?: string): Promise<Result<Match, DatabaseError>> {
+    return tryCatch(async () => {
+      const matchResult = await this.findById(id)
+      if (matchResult.error) {
+        throw matchResult.error
+      }
+      
+      if (!matchResult.data) {
+        throw new RecordNotFoundError(id, this.entityName)
+      }
 
-    if (match.status !== 'scheduled') {
-      throw new Error(`Match cannot be started. Current status: ${match.status}`)
-    }
+      const match = matchResult.data
+      if (match.status !== 'scheduled') {
+        throw new DatabaseError(`Match cannot be started. Current status: ${match.status}`)
+      }
 
-    const updateData: Partial<Match> = {
-      status: 'active',
-      startTime: new Date().toISOString()
-    }
+      const updateData: Partial<Match> = {
+        status: 'active',
+        startTime: new Date().toISOString()
+      }
 
-    if (courtId) {
-      updateData.courtId = courtId
-    }
+      if (courtId) {
+        updateData.courtId = courtId
+      }
 
-    return this.update(id, updateData)
+      const updateResult = await this.update(id, updateData)
+      if (updateResult.error) {
+        throw updateResult.error
+      }
+      
+      return updateResult.data
+    })
   }
 
   /**
    * Update match score
    */
-  async updateScore(id: string, scoreUpdate: Partial<Score>): Promise<Match> {
-    const match = await this.findById(id)
-    if (!match) {
-      throw new RecordNotFoundError(id, this.entityName)
-    }
-
-    if (match.status === 'completed' || match.status === 'cancelled') {
-      throw new Error('Cannot update score for completed or cancelled match')
-    }
-
-    const updatedScore = {
-      ...match.score,
-      ...scoreUpdate
-    }
-
-    // Validate score
-    const scoreValidation = ScoreSchema.safeParse(updatedScore)
-    if (!scoreValidation.success) {
-      throw new Error(`Invalid score: ${scoreValidation.error.message}`)
-    }
-
-    const updateData: Partial<Match> = {
-      score: updatedScore
-    }
-
-    // If score is complete, set winner and complete match
-    if (updatedScore.isComplete) {
-      if (updatedScore.team1 === 13) {
-        updateData.winner = match.team1.id
-      } else if (updatedScore.team2 === 13) {
-        updateData.winner = match.team2.id
+  async updateScore(id: string, scoreUpdate: Partial<Score>): Promise<Result<Match, DatabaseError>> {
+    return tryCatch(async () => {
+      const matchResult = await this.findById(id)
+      if (matchResult.error) {
+        throw matchResult.error
       }
-
-      updateData.status = 'completed'
-      updateData.endTime = new Date().toISOString()
       
-      // Calculate duration
-      if (match.startTime) {
-        const startTime = new Date(match.startTime).getTime()
-        const endTime = new Date().getTime()
-        updateData.duration = Math.round((endTime - startTime) / (1000 * 60)) // minutes
+      if (!matchResult.data) {
+        throw new RecordNotFoundError(id, this.entityName)
       }
-    }
 
-    return this.update(id, updateData)
+      const match = matchResult.data
+      if (match.status === 'completed' || match.status === 'cancelled') {
+        throw new DatabaseError('Cannot update score for completed or cancelled match')
+      }
+
+      const updatedScore = {
+        ...match.score,
+        ...scoreUpdate
+      }
+
+      // Validate score
+      const scoreValidation = ScoreSchema.safeParse(updatedScore)
+      if (!scoreValidation.success) {
+        throw new DatabaseError(`Invalid score: ${scoreValidation.error.message}`)
+      }
+
+      const updateData: Partial<Match> = {
+        score: updatedScore
+      }
+
+      // If score is complete, set winner and complete match
+      if (updatedScore.isComplete) {
+        if (updatedScore.team1 === 13) {
+          updateData.winner = match.team1.id
+        } else if (updatedScore.team2 === 13) {
+          updateData.winner = match.team2.id
+        }
+
+        updateData.status = 'completed'
+        updateData.endTime = new Date().toISOString()
+        
+        // Calculate duration
+        if (match.startTime) {
+          const startTime = new Date(match.startTime).getTime()
+          const endTime = new Date().getTime()
+          updateData.duration = Math.round((endTime - startTime) / (1000 * 60)) // minutes
+        }
+      }
+
+      const updateResult = await this.update(id, updateData)
+      if (updateResult.error) {
+        throw updateResult.error
+      }
+      
+      return updateResult.data
+    })
   }
 
   /**
    * Add an end to a match
    */
-  async addEnd(id: string, endData: Omit<End, 'id' | 'createdAt'>): Promise<Match> {
-    const match = await this.findById(id)
-    if (!match) {
-      throw new RecordNotFoundError(id, this.entityName)
-    }
-
-    if (match.status !== 'active') {
-      throw new Error('Can only add ends to active matches')
-    }
-
-    // Create the end with ID and timestamp
-    const end: End = {
-      ...endData,
-      id: this.generateId(),
-      createdAt: new Date().toISOString()
-    }
-
-    // Validate end
-    const endValidation = EndSchema.safeParse(end)
-    if (!endValidation.success) {
-      throw new Error(`Invalid end data: ${endValidation.error.message}`)
-    }
-
-    // Add end to match
-    const updatedEnds = [...match.ends, end]
-
-    // Update match score based on ends
-    const team1Score = updatedEnds
-      .filter(e => e.winner === match.team1.id)
-      .reduce((sum, e) => sum + e.points, 0)
-    
-    const team2Score = updatedEnds
-      .filter(e => e.winner === match.team2.id)
-      .reduce((sum, e) => sum + e.points, 0)
-
-    const updatedScore: Score = {
-      team1: team1Score,
-      team2: team2Score,
-      isComplete: team1Score === 13 || team2Score === 13
-    }
-
-    const updateData: Partial<Match> = {
-      ends: updatedEnds,
-      score: updatedScore
-    }
-
-    // If score is complete, set winner and complete match
-    if (updatedScore.isComplete) {
-      updateData.winner = team1Score === 13 ? match.team1.id : match.team2.id
-      updateData.status = 'completed'
-      updateData.endTime = new Date().toISOString()
-      
-      // Calculate duration
-      if (match.startTime) {
-        const startTime = new Date(match.startTime).getTime()
-        const endTime = new Date().getTime()
-        updateData.duration = Math.round((endTime - startTime) / (1000 * 60))
+  async addEnd(id: string, endData: Omit<End, 'id' | 'createdAt'>): Promise<Result<Match, DatabaseError>> {
+    return tryCatch(async () => {
+      const matchResult = await this.findById(id)
+      if (matchResult.error) {
+        throw matchResult.error
       }
-    }
+      
+      if (!matchResult.data) {
+        throw new RecordNotFoundError(id, this.entityName)
+      }
 
-    return this.update(id, updateData)
+      const match = matchResult.data
+      if (match.status !== 'active') {
+        throw new DatabaseError('Can only add ends to active matches')
+      }
+
+      // Create the end with ID and timestamp
+      const end: End = {
+        ...endData,
+        id: this.generateId(),
+        createdAt: new Date().toISOString()
+      }
+
+      // Validate end
+      const endValidation = EndSchema.safeParse(end)
+      if (!endValidation.success) {
+        throw new DatabaseError(`Invalid end data: ${endValidation.error.message}`)
+      }
+
+      // Add end to match
+      const updatedEnds = [...match.ends, end]
+
+      // Update match score based on ends
+      const team1Score = updatedEnds
+        .filter(e => e.winner === match.team1.id)
+        .reduce((sum, e) => sum + e.points, 0)
+      
+      const team2Score = updatedEnds
+        .filter(e => e.winner === match.team2.id)
+        .reduce((sum, e) => sum + e.points, 0)
+
+      const updatedScore: Score = {
+        team1: team1Score,
+        team2: team2Score,
+        isComplete: team1Score === 13 || team2Score === 13
+      }
+
+      const updateData: Partial<Match> = {
+        ends: updatedEnds,
+        score: updatedScore
+      }
+
+      // If score is complete, set winner and complete match
+      if (updatedScore.isComplete) {
+        updateData.winner = team1Score === 13 ? match.team1.id : match.team2.id
+        updateData.status = 'completed'
+        updateData.endTime = new Date().toISOString()
+        
+        // Calculate duration
+        if (match.startTime) {
+          const startTime = new Date(match.startTime).getTime()
+          const endTime = new Date().getTime()
+          updateData.duration = Math.round((endTime - startTime) / (1000 * 60))
+        }
+      }
+
+      const updateResult = await this.update(id, updateData)
+      if (updateResult.error) {
+        throw updateResult.error
+      }
+      
+      return updateResult.data
+    })
   }
 
   /**
    * Update an existing end
    */
-  async updateEnd(matchId: string, endId: string, endUpdate: Partial<End>): Promise<Match> {
-    const match = await this.findById(matchId)
-    if (!match) {
-      throw new RecordNotFoundError(matchId, this.entityName)
-    }
+  async updateEnd(matchId: string, endId: string, endUpdate: Partial<End>): Promise<Result<Match, DatabaseError>> {
+    return tryCatch(async () => {
+      const matchResult = await this.findById(matchId)
+      if (matchResult.error) {
+        throw matchResult.error
+      }
+      
+      if (!matchResult.data) {
+        throw new RecordNotFoundError(matchId, this.entityName)
+      }
 
-    const endIndex = match.ends.findIndex(e => e.id === endId)
-    if (endIndex === -1) {
-      throw new Error(`End with ID ${endId} not found in match`)
-    }
+      const match = matchResult.data
+      const endIndex = match.ends.findIndex(e => e.id === endId)
+      if (endIndex === -1) {
+        throw new DatabaseError(`End with ID ${endId} not found in match`)
+      }
 
-    // Update the end
-    const updatedEnd = {
-      ...match.ends[endIndex],
-      ...endUpdate
-    }
+      // Update the end
+      const updatedEnd = {
+        ...match.ends[endIndex],
+        ...endUpdate
+      }
 
-    // Validate updated end
-    const endValidation = EndSchema.safeParse(updatedEnd)
-    if (!endValidation.success) {
-      throw new Error(`Invalid end data: ${endValidation.error.message}`)
-    }
+      // Validate updated end
+      const endValidation = EndSchema.safeParse(updatedEnd)
+      if (!endValidation.success) {
+        throw new DatabaseError(`Invalid end data: ${endValidation.error.message}`)
+      }
 
-    // Update ends array
-    const updatedEnds = [...match.ends]
-    updatedEnds[endIndex] = updatedEnd
+      // Update ends array
+      const updatedEnds = [...match.ends]
+      updatedEnds[endIndex] = updatedEnd
 
-    // Recalculate match score
-    const team1Score = updatedEnds
-      .filter(e => e.winner === match.team1.id)
-      .reduce((sum, e) => sum + e.points, 0)
-    
-    const team2Score = updatedEnds
-      .filter(e => e.winner === match.team2.id)
-      .reduce((sum, e) => sum + e.points, 0)
+      // Recalculate match score
+      const team1Score = updatedEnds
+        .filter(e => e.winner === match.team1.id)
+        .reduce((sum, e) => sum + e.points, 0)
+      
+      const team2Score = updatedEnds
+        .filter(e => e.winner === match.team2.id)
+        .reduce((sum, e) => sum + e.points, 0)
 
-    const updatedScore: Score = {
-      team1: team1Score,
-      team2: team2Score,
-      isComplete: team1Score === 13 || team2Score === 13
-    }
+      const updatedScore: Score = {
+        team1: team1Score,
+        team2: team2Score,
+        isComplete: team1Score === 13 || team2Score === 13
+      }
 
-    return this.update(matchId, {
-      ends: updatedEnds,
-      score: updatedScore
+      const updateResult = await this.update(matchId, {
+        ends: updatedEnds,
+        score: updatedScore
+      })
+      
+      if (updateResult.error) {
+        throw updateResult.error
+      }
+      
+      return updateResult.data
     })
   }
 
   /**
    * Complete a match manually
    */
-  async completeMatch(id: string, finalScore: Score, winnerId: string): Promise<Match> {
-    const match = await this.findById(id)
-    if (!match) {
-      throw new RecordNotFoundError(id, this.entityName)
-    }
+  async completeMatch(id: string, finalScore: Score, winnerId: string): Promise<Result<Match, DatabaseError>> {
+    return tryCatch(async () => {
+      const matchResult = await this.findById(id)
+      if (matchResult.error) {
+        throw matchResult.error
+      }
+      
+      if (!matchResult.data) {
+        throw new RecordNotFoundError(id, this.entityName)
+      }
 
-    if (match.status === 'completed') {
-      throw new Error('Match is already completed')
-    }
+      const match = matchResult.data
+      if (match.status === 'completed') {
+        throw new DatabaseError('Match is already completed')
+      }
 
-    // Validate final score
-    const scoreValidation = ScoreSchema.safeParse(finalScore)
-    if (!scoreValidation.success) {
-      throw new Error(`Invalid final score: ${scoreValidation.error.message}`)
-    }
+      // Validate final score
+      const scoreValidation = ScoreSchema.safeParse(finalScore)
+      if (!scoreValidation.success) {
+        throw new DatabaseError(`Invalid final score: ${scoreValidation.error.message}`)
+      }
 
-    if (!finalScore.isComplete) {
-      throw new Error('Final score must be complete')
-    }
+      if (!finalScore.isComplete) {
+        throw new DatabaseError('Final score must be complete')
+      }
 
-    // Validate winner
-    if (winnerId !== match.team1.id && winnerId !== match.team2.id) {
-      throw new Error('Winner must be one of the participating teams')
-    }
+      // Validate winner
+      if (winnerId !== match.team1.id && winnerId !== match.team2.id) {
+        throw new DatabaseError('Winner must be one of the participating teams')
+      }
 
-    const updateData: Partial<Match> = {
-      status: 'completed',
-      score: finalScore,
-      winner: winnerId,
-      endTime: new Date().toISOString()
-    }
+      const updateData: Partial<Match> = {
+        status: 'completed',
+        score: finalScore,
+        winner: winnerId,
+        endTime: new Date().toISOString()
+      }
 
-    // Calculate duration if match was started
-    if (match.startTime) {
-      const startTime = new Date(match.startTime).getTime()
-      const endTime = new Date().getTime()
-      updateData.duration = Math.round((endTime - startTime) / (1000 * 60))
-    }
+      // Calculate duration if match was started
+      if (match.startTime) {
+        const startTime = new Date(match.startTime).getTime()
+        const endTime = new Date().getTime()
+        updateData.duration = Math.round((endTime - startTime) / (1000 * 60))
+      }
 
-    return this.update(id, updateData)
+      const updateResult = await this.update(id, updateData)
+      if (updateResult.error) {
+        throw updateResult.error
+      }
+      
+      return updateResult.data
+    })
   }
 
   /**
    * Cancel a match
    */
-  async cancelMatch(id: string, reason?: string): Promise<Match> {
-    const match = await this.findById(id)
-    if (!match) {
-      throw new RecordNotFoundError(id, this.entityName)
-    }
+  async cancelMatch(id: string, reason?: string): Promise<Result<Match, DatabaseError>> {
+    return tryCatch(async () => {
+      const matchResult = await this.findById(id)
+      if (matchResult.error) {
+        throw matchResult.error
+      }
+      
+      if (!matchResult.data) {
+        throw new RecordNotFoundError(id, this.entityName)
+      }
 
-    if (match.status === 'completed') {
-      throw new Error('Cannot cancel completed match')
-    }
+      const match = matchResult.data
+      if (match.status === 'completed') {
+        throw new DatabaseError('Cannot cancel completed match')
+      }
 
-    const updateData: Partial<Match> = {
-      status: 'cancelled',
-      endTime: new Date().toISOString()
-    }
+      const updateData: Partial<Match> = {
+        status: 'cancelled',
+        endTime: new Date().toISOString()
+      }
 
-    if (reason) {
-      updateData.notes = match.notes ? `${match.notes}\n\nCancellation reason: ${reason}` : `Cancelled: ${reason}`
-    }
+      if (reason) {
+        updateData.notes = match.notes ? `${match.notes}\n\nCancellation reason: ${reason}` : `Cancelled: ${reason}`
+      }
 
-    return this.update(id, updateData)
+      const updateResult = await this.update(id, updateData)
+      if (updateResult.error) {
+        throw updateResult.error
+      }
+      
+      return updateResult.data
+    })
   }
 
   /**
    * Assign court to match
    */
-  async assignCourt(id: string, courtId: string): Promise<Match> {
+  async assignCourt(id: string, courtId: string): Promise<Result<Match, DatabaseError>> {
     return this.update(id, { courtId })
   }
 
   /**
    * Update match schedule
    */
-  async updateSchedule(id: string, scheduledTime: string): Promise<Match> {
-    const match = await this.findById(id)
-    if (!match) {
-      throw new RecordNotFoundError(id, this.entityName)
-    }
+  async updateSchedule(id: string, scheduledTime: string): Promise<Result<Match, DatabaseError>> {
+    return tryCatch(async () => {
+      const matchResult = await this.findById(id)
+      if (matchResult.error) {
+        throw matchResult.error
+      }
+      
+      if (!matchResult.data) {
+        throw new RecordNotFoundError(id, this.entityName)
+      }
 
-    if (match.status !== 'scheduled') {
-      throw new Error('Can only reschedule scheduled matches')
-    }
+      const match = matchResult.data
+      if (match.status !== 'scheduled') {
+        throw new DatabaseError('Can only reschedule scheduled matches')
+      }
 
-    return this.update(id, { scheduledTime })
+      const updateResult = await this.update(id, { scheduledTime })
+      if (updateResult.error) {
+        throw updateResult.error
+      }
+      
+      return updateResult.data
+    })
   }
 
   /**
    * Get match statistics for tournament
    */
-  async getTournamentStats(tournamentId: string): Promise<{
+  async getTournamentStats(tournamentId: string): Promise<Result<{
     totalMatches: number
     completedMatches: number
     activeMatches: number
@@ -430,147 +537,174 @@ export class MatchDB extends BaseDB<Match> {
     cancelledMatches: number
     averageDuration: number
     totalDuration: number
-  }> {
-    const matches = await this.findByTournament(tournamentId)
-    
-    const stats = {
-      totalMatches: matches.length,
-      completedMatches: 0,
-      activeMatches: 0,
-      scheduledMatches: 0,
-      cancelledMatches: 0,
-      averageDuration: 0,
-      totalDuration: 0
-    }
-
-    let totalDuration = 0
-    let matchesWithDuration = 0
-
-    matches.forEach(match => {
-      switch (match.status) {
-        case 'completed':
-          stats.completedMatches++
-          if (match.duration) {
-            totalDuration += match.duration
-            matchesWithDuration++
-          }
-          break
-        case 'active':
-          stats.activeMatches++
-          break
-        case 'scheduled':
-          stats.scheduledMatches++
-          break
-        case 'cancelled':
-          stats.cancelledMatches++
-          break
+  }, DatabaseError>> {
+    return tryCatch(async () => {
+      const matchesResult = await this.findByTournament(tournamentId)
+      if (matchesResult.error) {
+        throw matchesResult.error
       }
+      const matches = matchesResult.data
+      
+      const stats = {
+        totalMatches: matches.length,
+        completedMatches: 0,
+        activeMatches: 0,
+        scheduledMatches: 0,
+        cancelledMatches: 0,
+        averageDuration: 0,
+        totalDuration: 0
+      }
+
+      let totalDuration = 0
+      let matchesWithDuration = 0
+
+      matches.forEach(match => {
+        switch (match.status) {
+          case 'completed':
+            stats.completedMatches++
+            if (match.duration) {
+              totalDuration += match.duration
+              matchesWithDuration++
+            }
+            break
+          case 'active':
+            stats.activeMatches++
+            break
+          case 'scheduled':
+            stats.scheduledMatches++
+            break
+          case 'cancelled':
+            stats.cancelledMatches++
+            break
+        }
+      })
+
+      stats.totalDuration = totalDuration
+      stats.averageDuration = matchesWithDuration > 0 
+        ? Math.round(totalDuration / matchesWithDuration) 
+        : 0
+
+      return stats
     })
-
-    stats.totalDuration = totalDuration
-    stats.averageDuration = matchesWithDuration > 0 
-      ? Math.round(totalDuration / matchesWithDuration) 
-      : 0
-
-    return stats
   }
 
   /**
    * Get upcoming matches for player
    */
-  async getUpcomingMatchesForPlayer(playerId: string, limit: number = 10): Promise<Match[]> {
-    const playerMatches = await this.findByPlayer(playerId)
-    const now = new Date()
-    
-    return playerMatches
-      .filter(match => 
-        match.status === 'scheduled' && 
-        match.scheduledTime && 
-        new Date(match.scheduledTime) > now
-      )
-      .sort((a, b) => 
-        new Date(a.scheduledTime!).getTime() - new Date(b.scheduledTime!).getTime()
-      )
-      .slice(0, limit)
+  async getUpcomingMatchesForPlayer(playerId: string, limit: number = 10): Promise<Result<Match[], DatabaseError>> {
+    return tryCatch(async () => {
+      const playerMatchesResult = await this.findByPlayer(playerId)
+      if (playerMatchesResult.error) {
+        throw playerMatchesResult.error
+      }
+      const playerMatches = playerMatchesResult.data
+      const now = new Date()
+      
+      return playerMatches
+        .filter(match => 
+          match.status === 'scheduled' && 
+          match.scheduledTime && 
+          new Date(match.scheduledTime) > now
+        )
+        .sort((a, b) => 
+          new Date(a.scheduledTime!).getTime() - new Date(b.scheduledTime!).getTime()
+        )
+        .slice(0, limit)
+    })
   }
 
   /**
    * Get recent matches for player
    */
-  async getRecentMatchesForPlayer(playerId: string, limit: number = 10): Promise<Match[]> {
-    const playerMatches = await this.findByPlayer(playerId)
-    
-    return playerMatches
-      .filter(match => match.status === 'completed')
-      .sort((a, b) => 
-        new Date(b.endTime!).getTime() - new Date(a.endTime!).getTime()
-      )
-      .slice(0, limit)
+  async getRecentMatchesForPlayer(playerId: string, limit: number = 10): Promise<Result<Match[], DatabaseError>> {
+    return tryCatch(async () => {
+      const playerMatchesResult = await this.findByPlayer(playerId)
+      if (playerMatchesResult.error) {
+        throw playerMatchesResult.error
+      }
+      const playerMatches = playerMatchesResult.data
+      
+      return playerMatches
+        .filter(match => match.status === 'completed')
+        .sort((a, b) => 
+          new Date(b.endTime!).getTime() - new Date(a.endTime!).getTime()
+        )
+        .slice(0, limit)
+    })
   }
 
   /**
    * Get live matches (active status)
    */
-  async getLiveMatches(): Promise<Match[]> {
+  async getLiveMatches(): Promise<Result<Match[], DatabaseError>> {
     return this.findActive()
   }
 
   /**
    * Get match results for bracket generation
    */
-  async getBracketResults(tournamentId: string, round: number, bracketType: BracketType): Promise<{
+  async getBracketResults(tournamentId: string, round: number, bracketType: BracketType): Promise<Result<{
     winners: string[]
     losers: string[]
     matches: Match[]
-  }> {
-    const matches = await this.findAll({ 
-      tournamentId, 
-      round, 
-      bracketType,
-      status: 'completed'
-    })
+  }, DatabaseError>> {
+    return tryCatch(async () => {
+      const matchesResult = await this.findAll({ 
+        tournamentId, 
+        round, 
+        bracketType,
+        status: 'completed'
+      })
 
-    const winners: string[] = []
-    const losers: string[] = []
-
-    matches.forEach(match => {
-      if (match.winner && match.status === 'completed') {
-        winners.push(match.winner)
-        
-        // Determine loser
-        const loserId = match.winner === match.team1.id ? match.team2.id : match.team1.id
-        losers.push(loserId)
+      if (matchesResult.error) {
+        throw matchesResult.error
       }
-    })
+      const matches = matchesResult.data
 
-    return { winners, losers, matches }
+      const winners: string[] = []
+      const losers: string[] = []
+
+      matches.forEach(match => {
+        if (match.winner && match.status === 'completed') {
+          winners.push(match.winner)
+          
+          // Determine loser
+          const loserId = match.winner === match.team1.id ? match.team2.id : match.team1.id
+          losers.push(loserId)
+        }
+      })
+
+      return { winners, losers, matches }
+    })
   }
 
   /**
    * Bulk create matches (for tournament bracket generation)
    */
-  async bulkCreate(matchesData: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>[]): Promise<{
+  async bulkCreate(matchesData: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>[]): Promise<Result<{
     successful: Match[]
     failed: { data: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>; error: string }[]
-  }> {
-    const result = {
-      successful: [] as Match[],
-      failed: [] as { data: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>; error: string }[]
-    }
-
-    for (const matchData of matchesData) {
-      try {
-        const match = await this.create(matchData)
-        result.successful.push(match)
-      } catch (error) {
-        result.failed.push({
-          data: matchData,
-          error: error instanceof Error ? error.message : 'Unknown error'
-        })
+  }, DatabaseError>> {
+    return tryCatch(async () => {
+      const result = {
+        successful: [] as Match[],
+        failed: [] as { data: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>; error: string }[]
       }
-    }
 
-    return result
+      for (const matchData of matchesData) {
+        const matchResult = await this.create(matchData)
+        if (matchResult.error) {
+          result.failed.push({
+            data: matchData,
+            error: matchResult.error.message
+          })
+        } else {
+          result.successful.push(matchResult.data)
+        }
+      }
+
+      return result
+    })
   }
 }
 
