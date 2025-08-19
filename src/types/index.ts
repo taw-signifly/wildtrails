@@ -284,19 +284,79 @@ export interface PaginatedResponse<T> {
   }
 }
 
+// Modern Error Handling Pattern
+export type Success<T> = { data: T; error: null }
+export type Failure<E> = { data: null; error: E }
+export type Result<T, E = Error> = Success<T> | Failure<E>
+
+export async function tryCatch<T, E = Error>(
+  promise: Promise<T>
+): Promise<Result<T, E>> {
+  try {
+    const data = await promise
+    return { data, error: null }
+  } catch (error) {
+    return { data: null, error: error as E }
+  }
+}
+
 // Real-time Event Types
+
+// Specific Event Data Interfaces
+export interface ScoreUpdateData {
+  matchId: string
+  score: Score
+  timestamp: string
+}
+
+export interface MatchCompleteData {
+  matchId: string
+  winner: string
+  finalScore: Score
+  duration: number
+  timestamp: string
+}
+
+export interface PlayerCheckinData {
+  playerId: string
+  tournamentId: string
+  checkedIn: boolean
+  timestamp: string
+}
+
+export interface TournamentStatusData {
+  tournamentId: string
+  status: TournamentStatus
+  timestamp: string
+}
+
+export type TournamentEventData = 
+  | Tournament 
+  | Match 
+  | Score 
+  | ScoreUpdateData 
+  | MatchCompleteData 
+  | PlayerCheckinData
+  | TournamentStatusData
+
+export type MatchEventData = 
+  | Match 
+  | Score 
+  | End 
+  | ScoreUpdateData 
+  | MatchCompleteData
 
 export interface TournamentUpdateEvent {
   type: 'tournament_updated' | 'match_started' | 'match_completed' | 'score_updated'
   tournamentId: string
-  data: Tournament | Match | Score | Record<string, unknown>
+  data: TournamentEventData
   timestamp: string
 }
 
 export interface MatchUpdateEvent {
   type: 'score_updated' | 'end_completed' | 'match_started' | 'match_completed'
   matchId: string
-  data: Match | Score | End | Record<string, unknown>
+  data: MatchEventData
   timestamp: string
 }
 
