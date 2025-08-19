@@ -125,3 +125,72 @@ export type {
   UpdateTeamStatsAction,
   TeamFilters
 } from '@/types/actions'
+
+// Match CRUD Actions
+export {
+  getMatches,
+  getMatchesByTournament,
+  getMatchesByPlayer,
+  getMatchById,
+  createMatchData,
+  updateMatch,
+  updateMatchData,
+  deleteMatch,
+  searchMatches,
+  startMatch,
+  completeMatch,
+  cancelMatch,
+  getLiveMatches,
+  getTournamentMatchStats
+} from './matches'
+
+// Live Scoring Actions
+export {
+  updateMatchScore,
+  submitEndScore,
+  addEndToMatch,
+  updateEndScore,
+  validateMatchScore,
+  getMatchProgress,
+  getMatchHistory,
+  getEndByEndDetails,
+  undoLastEnd,
+  updateScoreForm,
+  updateMatchScoreForm
+} from './live-scoring'
+
+// Court Management Actions
+export {
+  getCourts,
+  getCourtById,
+  createCourt,
+  updateCourtData,
+  updateCourtStatus,
+  assignMatchToCourt,
+  releaseCourtAssignment,
+  findAvailableCourt,
+  getCourtAvailability,
+  getCourtSchedule,
+  reserveCourtForMatch,
+  setCourtMaintenance,
+  removeCourtMaintenance,
+  getCourtUtilization,
+  searchCourts
+} from './courts'
+
+// Bracket Management Actions
+export {
+  generateBracketMatches,
+  generateBracketMatchesForm,
+  updateBracketProgression,
+  getActiveTournamentMatches,
+  getBracketStructure,
+  advanceWinnerToBracket,
+  getBracketResults
+} from './bracket-management'
+
+// Types for bracket management
+export type {
+  BracketNode,
+  BracketUpdate
+} from './bracket-management'
