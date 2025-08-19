@@ -5,16 +5,128 @@
 import { promises as fs } from 'fs'
 import { join } from 'path'
 import { TournamentDB, TournamentUtils } from '../tournaments'
-import { TournamentFormData, TournamentStatus } from '@/types'
+import { TournamentFormData, TournamentStatus, Result, DatabaseError } from '@/types'
+import { ValidationError } from '../base'
+import { ZodError } from 'zod'
+
+// Helper function to unwrap Result objects in tests
+function expectSuccess<T>(result: Result<T, DatabaseError>): T {
+  if (result.error) {
+    throw result.error
+  }
+  expect(result.data).toBeDefined()
+  return result.data!
+}
+
+function expectError<T>(result: Result<T, DatabaseError>): DatabaseError {
+  expect(result.error).toBeDefined()
+  expect(result.data).toBeNull()
+  return result.error!
+}
+
+// Helper to create database method that returns unwrapped data for easier testing
+function createTestDB(testPath: string) {
+  const db = new TournamentDB({ dataPath: testPath })
+  
+  return {
+    async create(formData: TournamentFormData) {
+      const result = await db.create(formData)
+      return expectSuccess(result)
+    },
+    async findById(id: string) {
+      const result = await db.findById(id)
+      return expectSuccess(result)
+    },
+    async findByStatus(status: TournamentStatus) {
+      const result = await db.findByStatus(status)
+      return expectSuccess(result)
+    },
+    async findByType(type: any) {
+      const result = await db.findByType(type)
+      return expectSuccess(result)
+    },
+    async findByOrganizer(organizer: string) {
+      const result = await db.findByOrganizer(organizer)
+      return expectSuccess(result)
+    },
+    async findActive() {
+      const result = await db.findActive()
+      return expectSuccess(result)
+    },
+    async findUpcoming() {
+      const result = await db.findUpcoming()
+      return expectSuccess(result)
+    },
+    async findAll(filters?: any) {
+      const result = await db.findAll(filters)
+      return expectSuccess(result)
+    },
+    async startTournament(id: string) {
+      const result = await db.startTournament(id)
+      return expectSuccess(result)
+    },
+    async completeTournament(id: string, stats?: any) {
+      const result = await db.completeTournament(id, stats)
+      return expectSuccess(result)
+    },
+    async addPlayer(tournamentId: string, playerId: string) {
+      const result = await db.addPlayer(tournamentId, playerId)
+      return expectSuccess(result)
+    },
+    async removePlayer(tournamentId: string, playerId: string) {
+      const result = await db.removePlayer(tournamentId, playerId)
+      return expectSuccess(result)
+    },
+    async updateStats(id: string, stats: any) {
+      const result = await db.updateStats(id, stats)
+      return expectSuccess(result)
+    },
+    async search(query: string) {
+      const result = await db.search(query)
+      return expectSuccess(result)
+    },
+    async findInDateRange(start: Date, end: Date) {
+      const result = await db.findInDateRange(start, end)
+      return expectSuccess(result)
+    },
+    async getStatsSummary() {
+      const result = await db.getStatsSummary()
+      return expectSuccess(result)
+    },
+    
+    // Methods that should return errors for testing
+    rawDB: db,
+    async expectCreateError(formData: TournamentFormData) {
+      const result = await db.create(formData)
+      return expectError(result)
+    },
+    async expectStartError(id: string) {
+      const result = await db.startTournament(id)
+      return expectError(result)
+    },
+    async expectCompleteError(id: string, stats?: any) {
+      const result = await db.completeTournament(id, stats)
+      return expectError(result)
+    },
+    async expectAddPlayerError(tournamentId: string, playerId: string) {
+      const result = await db.addPlayer(tournamentId, playerId)
+      return expectError(result)
+    },
+    async expectRemovePlayerError(tournamentId: string, playerId: string) {
+      const result = await db.removePlayer(tournamentId, playerId)
+      return expectError(result)
+    }
+  }
+}
 
 describe('TournamentDB', () => {
-  let db: TournamentDB
+  let db: ReturnType<typeof createTestDB>
   let testPath: string
 
   beforeEach(async () => {
     testPath = join(__dirname, 'tournaments-test-' + Date.now())
-    db = new TournamentDB({ dataPath: testPath })
-    await (db as unknown as { ensureDirectoryExists(): Promise<void> }).ensureDirectoryExists()
+    db = createTestDB(testPath)
+    await (db.rawDB as unknown as { ensureDirectoryExists(): Promise<void> }).ensureDirectoryExists()
   })
 
   afterEach(async () => {
@@ -63,12 +175,15 @@ describe('TournamentDB', () => {
         maxPlayers: 2 // Below minimum
       }
 
-      await expect(db.create(invalidData)).rejects.toThrow()
+      const error = await db.expectCreateError(invalidData)
+      // The error will be a ZodError wrapped by our tryCatch, not ValidationError
+      expect(error).toBeInstanceOf(ZodError)
+      expect(error.message || error.toString()).toContain('Minimum 4 players required')
     })
 
     it('should apply default settings', async () => {
       const formData = createSampleTournamentData()
-      delete formData.settings
+      delete (formData as any).settings
       
       const tournament = await db.create(formData)
       
@@ -89,6 +204,12 @@ describe('TournamentDB', () => {
         ...createSampleTournamentData(),
         name: 'Summer Cup'
       })
+      
+      // Add players to tournament1 before starting
+      await db.addPlayer(tournament1.id, 'player1')
+      await db.addPlayer(tournament1.id, 'player2')
+      await db.addPlayer(tournament1.id, 'player3')
+      await db.addPlayer(tournament1.id, 'player4')
       
       // Start one tournament
       await db.startTournament(tournament1.id)
@@ -200,8 +321,8 @@ describe('TournamentDB', () => {
     it('should fail to start tournament without minimum players', async () => {
       const tournament = await db.create(createSampleTournamentData())
       
-      await expect(db.startTournament(tournament.id))
-        .rejects.toThrow('Minimum 4 players required')
+      const error = await db.expectStartError(tournament.id)
+      expect(error.message).toContain('Minimum 4 players required')
     })
 
     it('should fail to start tournament not in setup status', async () => {
@@ -213,8 +334,8 @@ describe('TournamentDB', () => {
       
       await db.startTournament(tournament.id)
       
-      await expect(db.startTournament(tournament.id))
-        .rejects.toThrow('Tournament is not in setup status')
+      const error = await db.expectStartError(tournament.id)
+      expect(error.message).toContain('Tournament is not in setup status')
     })
   })
 
@@ -232,7 +353,11 @@ describe('TournamentDB', () => {
       // Complete tournament
       const completed = await db.completeTournament(started.id, {
         totalMatches: 10,
-        completedMatches: 10
+        completedMatches: 10,
+        averageMatchDuration: 45,
+        totalEnds: 50,
+        highestScore: 13,
+        averageScore: 8.5
       })
       
       expect(completed.status).toBe('completed')
@@ -243,8 +368,8 @@ describe('TournamentDB', () => {
     it('should fail to complete non-active tournament', async () => {
       const tournament = await db.create(createSampleTournamentData())
       
-      await expect(db.completeTournament(tournament.id))
-        .rejects.toThrow('Tournament is not active')
+      const error = await db.expectCompleteError(tournament.id)
+      expect(error.message).toContain('Tournament is not active')
     })
   })
 
@@ -259,14 +384,16 @@ describe('TournamentDB', () => {
     it('should fail when tournament is full', async () => {
       const tournament = await db.create({
         ...createSampleTournamentData(),
-        maxPlayers: 2
+        maxPlayers: 4 // Use minimum allowed, then fill it
       })
       
       await db.addPlayer(tournament.id, 'player1')
       await db.addPlayer(tournament.id, 'player2')
+      await db.addPlayer(tournament.id, 'player3')
+      await db.addPlayer(tournament.id, 'player4')
       
-      await expect(db.addPlayer(tournament.id, 'player3'))
-        .rejects.toThrow('Tournament is full')
+      const error = await db.expectAddPlayerError(tournament.id, 'player5')
+      expect(error.message).toContain('Tournament is full')
     })
 
     it('should fail late registration when not allowed', async () => {
@@ -282,8 +409,8 @@ describe('TournamentDB', () => {
       await db.addPlayer(tournament.id, 'player4')
       await db.startTournament(tournament.id)
       
-      await expect(db.addPlayer(tournament.id, 'player5'))
-        .rejects.toThrow('Late registration is not allowed')
+      const error = await db.expectAddPlayerError(tournament.id, 'player5')
+      expect(error.message).toContain('Late registration is not allowed')
     })
   })
 
@@ -299,8 +426,9 @@ describe('TournamentDB', () => {
     it('should not go below zero players', async () => {
       const tournament = await db.create(createSampleTournamentData())
       
-      const updated = await db.removePlayer(tournament.id, 'player1')
-      expect(updated.currentPlayers).toBe(0)
+      // This should now fail with an error rather than returning a result with 0 players
+      const error = await db.expectRemovePlayerError(tournament.id, 'player1')
+      expect(error.message).toContain('No players to remove')
     })
 
     it('should fail to remove from active tournament', async () => {
@@ -311,8 +439,8 @@ describe('TournamentDB', () => {
       await db.addPlayer(tournament.id, 'player4')
       await db.startTournament(tournament.id)
       
-      await expect(db.removePlayer(tournament.id, 'player1'))
-        .rejects.toThrow('Cannot remove players from active tournament')
+      const error = await db.expectRemovePlayerError(tournament.id, 'player1')
+      expect(error.message).toContain('Cannot remove players from active tournament')
     })
   })
 

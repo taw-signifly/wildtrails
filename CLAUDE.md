@@ -46,7 +46,9 @@ Use the Task tool to launch these agents proactively when their expertise matche
 - Geist font family (sans and mono) preloaded from Google Fonts
 - **State Management**: Zustand + React Context for global state
 - **Data Storage**: JSON files with Node.js fs operations for mock data
+- **Server Actions**: Next.js 15 server actions for all CRUD operations (preferred over API routes)
 - **Real-time Updates**: Server-Sent Events (SSE) for live tournament updates
+- **Form Integration**: React 19 `useActionState` with progressive enhancement
 
 **Key Configuration**:
 
@@ -54,27 +56,93 @@ Use the Task tool to launch these agents proactively when their expertise matche
 - ESLint extends `next/core-web-vitals` and `next/typescript`
 - Uses Turbopack for fast development builds
 
-**Planned Project Structure**:
+**Current Project Structure**:
 ```
 src/
 ├── app/                      # Next.js App Router
-│   ├── (dashboard)/         # Dashboard route group  
-│   ├── tournament/          # Active tournament views
-│   ├── api/                 # API routes (tournaments, matches, players, live)
+│   ├── (dashboard)/         # Dashboard route group (planned)
+│   ├── tournament/          # Active tournament views (planned)
+│   ├── api/live/            # SSE routes only (real-time events)
 │   └── ...
 ├── components/              # React components
-│   ├── ui/                  # ShadCN base components
-│   ├── tournament/          # Tournament-specific components
-│   ├── scoring/             # Scoring interface components
-│   └── brackets/            # Bracket visualization
+│   └── ui/                  # ShadCN base components
 ├── lib/                     # Utility libraries
-│   ├── db/                  # JSON data operations
-│   ├── tournament/          # Tournament logic & bracket generation
-│   └── scoring/             # Scoring algorithms
+│   ├── actions/             # ✅ Server Actions (preferred over API routes)
+│   │   ├── tournaments.ts   # Tournament CRUD & management
+│   │   ├── tournament-management.ts # Tournament lifecycle
+│   │   └── tournament-utils.ts      # Utility actions
+│   ├── api/                 # API utilities for server actions
+│   │   ├── response.ts      # Response formatting
+│   │   ├── pagination.ts    # Pagination helpers
+│   │   ├── validation.ts    # Input validation
+│   │   └── middleware.ts    # Security & rate limiting
+│   ├── db/                  # JSON database operations
+│   │   ├── base.ts          # Base database class
+│   │   ├── tournaments.ts   # Tournament data operations
+│   │   ├── players.ts       # Player data operations
+│   │   ├── matches.ts       # Match data operations
+│   │   └── courts.ts        # Court management
+│   └── validation/          # Zod schemas for type safety
+│       ├── tournament.ts    # Tournament validation
+│       ├── player.ts        # Player validation
+│       └── match.ts         # Match validation
 ├── types/                   # TypeScript definitions
-├── stores/                  # Zustand stores
-└── data/                    # Mock JSON files
+│   ├── index.ts             # Core domain types
+│   └── actions.ts           # Server action types
+└── data/                    # Mock JSON files (development)
 ```
+
+## Server Actions Architecture
+
+**WildTrails uses Next.js 15 server actions as the primary data layer**, providing type-safe, progressive enhancement and direct database access without traditional API routes.
+
+### Current Implementation Status
+
+✅ **Tournament Management** (Fully Implemented):
+- Complete CRUD operations (`tournaments.ts`)
+- Tournament lifecycle management (`tournament-management.ts`) 
+- Utility actions for filtering and search (`tournament-utils.ts`)
+- Form-compatible and programmatic interfaces
+- End-to-end type safety with `ActionResult<T>` pattern
+
+🔄 **Ready for Implementation**:
+- **Players Management** (Issue #5) - Player CRUD, team formation, statistics
+- **Match Management** (Issue #6) - Live scoring, bracket progression, real-time updates
+- **Courts Management** - Court assignment, scheduling, availability
+- **Real-time Features** - SSE integration, live tournament feeds
+
+### Server Actions Pattern
+
+All server actions follow a consistent pattern:
+
+```typescript
+// Form-compatible interface
+export const createTournament: ServerAction<Tournament> = async (formData: FormData) => {
+  'use server'
+  // Form data parsing, validation, database operation
+}
+
+// Programmatic interface
+export const createTournamentData: TypedAction<TournamentFormData, Tournament> = async (data) => {
+  'use server' 
+  // Direct data validation, database operation
+}
+
+// Standard return type
+export type ActionResult<T> = {
+  success: true; data: T; message?: string
+} | {
+  success: false; error: string; fieldErrors?: Record<string, string[]>
+}
+```
+
+### Key Benefits
+
+- **Zero API Routes Needed** - Direct database access from server components
+- **Built-in CSRF Protection** - Automatic security without middleware
+- **Progressive Enhancement** - Forms work without JavaScript  
+- **Type Safety** - End-to-end types from forms to database
+- **React 19 Integration** - Works with `useActionState` for optimistic updates
 
 ## Core Features to Implement
 
@@ -95,6 +163,41 @@ Key entities include Tournament, Player, Match, Team with specific Petanque scor
 
 ## Development Notes
 
-This is a **Petanque tournament management system** with complex tournament logic, real-time scoring, and bracket management. The application uses Next.js App Router with Server Components for data fetching and Client Components for interactive tournament features. 
+This is a **Petanque tournament management system** with complex tournament logic, real-time scoring, and bracket management. The application uses Next.js App Router with **Server Actions as the primary data layer** instead of traditional API routes.
 
-**Performance Requirements**: Support up to 200 players per tournament with real-time updates under 2 seconds. Uses JSON file storage for development with plans for database integration later.
+### Architecture Principles
+
+- **Server Actions First**: Use server actions for all CRUD operations, only use API routes for SSE streams
+- **Progressive Enhancement**: All forms work without JavaScript using server actions
+- **Type Safety**: End-to-end type safety from HTML forms to database with Zod validation
+- **Performance**: Support up to 200 players per tournament with real-time updates under 2 seconds
+- **Data Storage**: JSON file storage for development with plans for database integration later
+
+### Development Workflow
+
+1. **Database Layer**: Extend existing classes in `/src/lib/db/` for new entities
+2. **Validation**: Create Zod schemas in `/src/lib/validation/` for type safety
+3. **Server Actions**: Implement in `/src/lib/actions/` following tournament pattern
+4. **Types**: Update `/src/types/actions.ts` for new action signatures
+5. **Forms**: Use React 19 `useActionState` with server actions for optimal UX
+
+### Key Implementation Files
+
+- **Tournament Actions**: `/src/lib/actions/tournaments.ts` - Reference implementation
+- **Action Types**: `/src/types/actions.ts` - Type definitions for all server actions
+- **Database Base**: `/src/lib/db/base.ts` - Shared database functionality
+- **API Utils**: `/src/lib/api/` - Utilities adapted for server action use
+
+### Testing Infrastructure
+
+The project uses **Jest** for unit and integration testing:
+
+- **Database Tests**: `/src/lib/db/__tests__/` - Test database operations and business logic
+- **Existing Coverage**: Tournament and base database functionality tested
+- **Test Pattern**: Each database class has comprehensive test coverage
+- **Mock Data**: Tests use realistic tournament scenarios with proper validation
+
+**Test Commands**:
+- `npm test` - Run all tests
+- `npm run test:watch` - Run tests in watch mode
+- `npm run test:coverage` - Run tests with coverage report

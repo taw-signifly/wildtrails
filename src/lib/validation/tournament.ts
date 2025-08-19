@@ -56,7 +56,7 @@ export const TournamentFormDataSchema = z.object({
   location: z.string().max(200, 'Location must be less than 200 characters').optional(),
   organizer: z.string().min(1, 'Organizer name is required').max(100),
   maxPlayers: z.number().min(4, 'Minimum 4 players required').max(200, 'Maximum 200 players allowed'),
-  settings: TournamentSettingsSchema.partial()
+  settings: TournamentSettingsSchema.partial().optional()
 })
 
 // Full Tournament Entity Schema
