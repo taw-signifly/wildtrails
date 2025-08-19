@@ -4,87 +4,89 @@ import { revalidatePath } from 'next/cache'
 import { tournamentDB } from '@/lib/db/tournaments'
 import { TournamentFormDataSchema } from '@/lib/validation/tournament'
 import { sanitizeTournamentData, parsePaginationParams, paginateArray } from '@/lib/api'
-import { Tournament, TournamentFormData, TournamentFilters } from '@/types'
+import { resultToActionResult, parseFormDataField, parseFormDataBoolean, parseFormDataNumber, parseFormDataDate, formatZodErrors, isValidTournamentType, isValidGameFormat, isValidCourtAssignmentMode, isValidScoringMode } from '@/lib/api/action-utils'
+import { Tournament, TournamentFormData, TournamentFilters, TournamentSettings } from '@/types'
 import { ActionResult, ActionState } from '@/types/actions'
 import { z } from 'zod'
 
-/**
- * Format Zod validation errors for form field errors
- */
-function formatZodErrors(error: z.ZodError): Record<string, string[]> {
-  const fieldErrors: Record<string, string[]> = {}
-  
-  error.issues.forEach((err) => {
-    const path = err.path.join('.')
-    if (!fieldErrors[path]) {
-      fieldErrors[path] = []
-    }
-    fieldErrors[path].push(err.message)
-  })
-  
-  return fieldErrors
-}
 
 /**
- * Convert FormData to TournamentFormData object
+ * Convert FormData to TournamentFormData object with type safety
  */
 function formDataToTournamentData(formData: FormData): Partial<TournamentFormData> {
-  const data: any = {}
+  const data: Partial<TournamentFormData> = {}
   
-  // Basic fields
-  const name = formData.get('name')
-  if (name) data.name = name.toString()
+  // Basic fields with validation
+  const name = parseFormDataField(formData, 'name', (v) => v.trim(), false)
+  if (name) data.name = name
   
-  const type = formData.get('type')
-  if (type) data.type = type.toString()
+  const type = parseFormDataField(formData, 'type', (v) => {
+    if (!isValidTournamentType(v)) {
+      throw new Error('Invalid tournament type')
+    }
+    return v
+  }, false)
+  if (type) data.type = type
   
-  const format = formData.get('format')
-  if (format) data.format = format.toString()
+  const format = parseFormDataField(formData, 'format', (v) => {
+    if (!isValidGameFormat(v)) {
+      throw new Error('Invalid game format')
+    }
+    return v
+  }, false)
+  if (format) data.format = format
   
-  const maxPoints = formData.get('maxPoints')
-  if (maxPoints) data.maxPoints = parseInt(maxPoints.toString(), 10)
+  const maxPoints = parseFormDataField(formData, 'maxPoints', (v) => 
+    parseFormDataNumber(v, 1, 21), false
+  )
+  if (maxPoints !== undefined) data.maxPoints = maxPoints
   
-  const shortForm = formData.get('shortForm')
-  data.shortForm = shortForm === 'on' || shortForm === 'true'
+  data.shortForm = parseFormDataBoolean(formData, 'shortForm', false)
   
-  const startDate = formData.get('startDate')
-  if (startDate) data.startDate = new Date(startDate.toString()).toISOString()
+  const startDate = parseFormDataField(formData, 'startDate', parseFormDataDate, false)
+  if (startDate) data.startDate = startDate
   
-  const description = formData.get('description')
-  if (description) data.description = description.toString()
+  const description = parseFormDataField(formData, 'description', (v) => v.trim(), false)
+  if (description) data.description = description
   
-  const location = formData.get('location')
-  if (location) data.location = location.toString()
+  const location = parseFormDataField(formData, 'location', (v) => v.trim(), false)
+  if (location) data.location = location
   
-  const organizer = formData.get('organizer')
-  if (organizer) data.organizer = organizer.toString()
+  const organizer = parseFormDataField(formData, 'organizer', (v) => v.trim(), false)
+  if (organizer) data.organizer = organizer
   
-  const maxPlayers = formData.get('maxPlayers')
-  if (maxPlayers) data.maxPlayers = parseInt(maxPlayers.toString(), 10)
+  const maxPlayers = parseFormDataField(formData, 'maxPlayers', (v) => 
+    parseFormDataNumber(v, 2, 200), false
+  )
+  if (maxPlayers !== undefined) data.maxPlayers = maxPlayers
   
-  // Settings object
-  data.settings = {}
+  // Settings object with type safety
+  const settings: Partial<TournamentSettings> = {}
   
-  const allowLateRegistration = formData.get('settings.allowLateRegistration')
-  data.settings.allowLateRegistration = allowLateRegistration === 'on' || allowLateRegistration === 'true'
+  settings.allowLateRegistration = parseFormDataBoolean(formData, 'settings.allowLateRegistration', false)
+  settings.automaticBracketGeneration = parseFormDataBoolean(formData, 'settings.automaticBracketGeneration', true)
+  settings.requireCheckin = parseFormDataBoolean(formData, 'settings.requireCheckin', false)
   
-  const automaticBracketGeneration = formData.get('settings.automaticBracketGeneration')
-  data.settings.automaticBracketGeneration = automaticBracketGeneration === 'on' || automaticBracketGeneration === 'true'
+  const courtAssignmentMode = parseFormDataField(formData, 'settings.courtAssignmentMode', (v) => {
+    if (!isValidCourtAssignmentMode(v)) {
+      throw new Error('Invalid court assignment mode')
+    }
+    return v
+  }, false)
+  if (courtAssignmentMode) settings.courtAssignmentMode = courtAssignmentMode
   
-  const requireCheckin = formData.get('settings.requireCheckin')
-  data.settings.requireCheckin = requireCheckin === 'on' || requireCheckin === 'true'
+  const scoringMode = parseFormDataField(formData, 'settings.scoringMode', (v) => {
+    if (!isValidScoringMode(v)) {
+      throw new Error('Invalid scoring mode')
+    }
+    return v
+  }, false)
+  if (scoringMode) settings.scoringMode = scoringMode
   
-  const courtAssignmentMode = formData.get('settings.courtAssignmentMode')
-  if (courtAssignmentMode) data.settings.courtAssignmentMode = courtAssignmentMode.toString()
+  settings.realTimeUpdates = parseFormDataBoolean(formData, 'settings.realTimeUpdates', true)
+  settings.allowSpectators = parseFormDataBoolean(formData, 'settings.allowSpectators', true)
   
-  const scoringMode = formData.get('settings.scoringMode')
-  if (scoringMode) data.settings.scoringMode = scoringMode.toString()
-  
-  const realTimeUpdates = formData.get('settings.realTimeUpdates')
-  data.settings.realTimeUpdates = realTimeUpdates === 'on' || realTimeUpdates === 'true'
-  
-  const allowSpectators = formData.get('settings.allowSpectators')
-  data.settings.allowSpectators = allowSpectators === 'on' || allowSpectators === 'true'
+  data.settings = settings
   
   return data
 }
@@ -95,7 +97,7 @@ function formDataToTournamentData(formData: FormData): Partial<TournamentFormDat
  */
 export async function getTournaments(
   filters?: TournamentFilters & { page?: number; limit?: number }
-): Promise<ActionResult<{ tournaments: Tournament[]; pagination: any }>> {
+): Promise<ActionResult<{ tournaments: Tournament[]; pagination: { page: number; limit: number; total: number; totalPages: number } }>> {
   try {
     const page = filters?.page || 1
     const limit = filters?.limit || 20
@@ -217,26 +219,32 @@ export async function createTournament(formData: FormData): Promise<ActionResult
     }
     
     // Sanitize the data
-    const sanitizedData = sanitizeTournamentData(validation.data)
-    
-    // Create tournament in database
-    const result = await tournamentDB.create(sanitizedData as any)
-    
-    if (result.error) {
-      return {
-        success: false,
-        error: result.error.message || 'Failed to create tournament'
+    const sanitizedData = {
+      ...sanitizeTournamentData(validation.data),
+      settings: {
+        allowLateRegistration: false,
+        automaticBracketGeneration: true,
+        requireCheckin: false,
+        courtAssignmentMode: 'manual' as const,
+        scoringMode: 'self-report' as const,
+        realTimeUpdates: true,
+        allowSpectators: true,
+        ...validation.data.settings
       }
     }
     
-    // Revalidate tournaments page to show new tournament
-    revalidatePath('/tournaments')
+    // Create tournament in database
+    const result = await tournamentDB.create(sanitizedData)
     
-    return {
-      success: true,
-      data: result.data,
-      message: 'Tournament created successfully'
+    // Convert database result to action result
+    const actionResult = resultToActionResult(result, 'Tournament created successfully')
+    
+    // Revalidate tournaments page to show new tournament if successful
+    if (actionResult.success) {
+      revalidatePath('/tournaments')
     }
+    
+    return actionResult
     
   } catch (error) {
     console.error('Error creating tournament:', error)
@@ -263,26 +271,32 @@ export async function createTournamentData(data: TournamentFormData): Promise<Ac
     }
     
     // Sanitize the data
-    const sanitizedData = sanitizeTournamentData(validation.data)
-    
-    // Create tournament in database
-    const result = await tournamentDB.create(sanitizedData as any)
-    
-    if (result.error) {
-      return {
-        success: false,
-        error: result.error.message || 'Failed to create tournament'
+    const sanitizedData = {
+      ...sanitizeTournamentData(validation.data),
+      settings: {
+        allowLateRegistration: false,
+        automaticBracketGeneration: true,
+        requireCheckin: false,
+        courtAssignmentMode: 'manual' as const,
+        scoringMode: 'self-report' as const,
+        realTimeUpdates: true,
+        allowSpectators: true,
+        ...validation.data.settings
       }
     }
     
-    // Revalidate tournaments page
-    revalidatePath('/tournaments')
+    // Create tournament in database
+    const result = await tournamentDB.create(sanitizedData)
     
-    return {
-      success: true,
-      data: result.data,
-      message: 'Tournament created successfully'
+    // Convert database result to action result
+    const actionResult = resultToActionResult(result, 'Tournament created successfully')
+    
+    // Revalidate tournaments page if successful
+    if (actionResult.success) {
+      revalidatePath('/tournaments')
     }
+    
+    return actionResult
     
   } catch (error) {
     console.error('Error creating tournament:', error)
@@ -321,27 +335,33 @@ export async function updateTournament(id: string, formData: FormData): Promise<
     }
     
     // Sanitize the data
-    const sanitizedData = sanitizeTournamentData(validation.data)
-    
-    // Update tournament in database
-    const result = await tournamentDB.update(id, sanitizedData as any)
-    
-    if (result.error) {
-      return {
-        success: false,
-        error: result.error.message || 'Failed to update tournament'
+    const sanitizedData = {
+      ...sanitizeTournamentData(validation.data),
+      settings: {
+        allowLateRegistration: false,
+        automaticBracketGeneration: true,
+        requireCheckin: false,
+        courtAssignmentMode: 'manual' as const,
+        scoringMode: 'self-report' as const,
+        realTimeUpdates: true,
+        allowSpectators: true,
+        ...validation.data.settings
       }
     }
     
-    // Revalidate tournaments page and specific tournament page
-    revalidatePath('/tournaments')
-    revalidatePath(`/tournaments/${id}`)
+    // Update tournament in database
+    const result = await tournamentDB.update(id, sanitizedData)
     
-    return {
-      success: true,
-      data: result.data,
-      message: 'Tournament updated successfully'
+    // Convert database result to action result
+    const actionResult = resultToActionResult(result, 'Tournament updated successfully')
+    
+    // Revalidate tournaments page and specific tournament page if successful
+    if (actionResult.success) {
+      revalidatePath('/tournaments')
+      revalidatePath(`/tournaments/${id}`)
     }
+    
+    return actionResult
     
   } catch (error) {
     console.error('Error updating tournament:', error)
@@ -380,27 +400,33 @@ export async function updateTournamentData(
     }
     
     // Sanitize the data
-    const sanitizedData = sanitizeTournamentData(validation.data)
-    
-    // Update tournament in database
-    const result = await tournamentDB.update(id, sanitizedData as any)
-    
-    if (result.error) {
-      return {
-        success: false,
-        error: result.error.message || 'Failed to update tournament'
+    const sanitizedData = {
+      ...sanitizeTournamentData(validation.data),
+      settings: {
+        allowLateRegistration: false,
+        automaticBracketGeneration: true,
+        requireCheckin: false,
+        courtAssignmentMode: 'manual' as const,
+        scoringMode: 'self-report' as const,
+        realTimeUpdates: true,
+        allowSpectators: true,
+        ...validation.data.settings
       }
     }
     
-    // Revalidate caches
-    revalidatePath('/tournaments')
-    revalidatePath(`/tournaments/${id}`)
+    // Update tournament in database
+    const result = await tournamentDB.update(id, sanitizedData)
     
-    return {
-      success: true,
-      data: result.data,
-      message: 'Tournament updated successfully'
+    // Convert database result to action result
+    const actionResult = resultToActionResult(result, 'Tournament updated successfully')
+    
+    // Revalidate caches if successful
+    if (actionResult.success) {
+      revalidatePath('/tournaments')
+      revalidatePath(`/tournaments/${id}`)
     }
+    
+    return actionResult
     
   } catch (error) {
     console.error('Error updating tournament:', error)

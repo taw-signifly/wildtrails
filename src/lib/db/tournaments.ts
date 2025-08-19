@@ -519,7 +519,7 @@ export class TournamentDB extends BaseDB<Tournament> {
         currentPlayers: tournament.currentPlayers,
         endDate: tournament.endDate,
         stats: tournament.stats
-      } as any)
+      })
       
       if (updateResult.error) {
         throw updateResult.error
