@@ -81,6 +81,7 @@ export type {
 } from '@/types'
 
 // Import required classes for DatabaseManager
+import { BaseDB } from './base'
 import { TournamentDB, tournamentDB } from './tournaments'
 import { PlayerDB, playerDB } from './players'
 import { MatchDB, matchDB } from './matches'
@@ -112,7 +113,7 @@ export class DatabaseManager {
     const databases = [this.tournaments, this.players, this.matches, this.courts]
     
     await Promise.all(
-      databases.map(db => (db as BaseDB<any>).ensureDirectoryExists())
+      databases.map(db => (db as any).ensureDirectoryExists())
     )
   }
 
