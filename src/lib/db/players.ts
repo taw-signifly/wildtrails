@@ -100,6 +100,7 @@ export class PlayerDB extends BaseDB<Player> {
   /**
    * Find players participating in a tournament
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async findByTournament(_tournamentId: string): Promise<Player[]> {
     // This would typically query a junction table or tournament-player relationship
     // For now, we'll implement a basic version that could be extended
@@ -353,6 +354,7 @@ export class PlayerDB extends BaseDB<Player> {
   /**
    * Get inactive players (no recent matches)
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async getInactivePlayers(_daysSinceLastMatch: number = 90): Promise<Player[]> {
     // This would typically check last match date from match history
     // For now, we'll use a simple heuristic based on empty recent form

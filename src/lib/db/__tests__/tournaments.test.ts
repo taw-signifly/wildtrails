@@ -14,13 +14,13 @@ describe('TournamentDB', () => {
   beforeEach(async () => {
     testPath = join(__dirname, 'tournaments-test-' + Date.now())
     db = new TournamentDB({ dataPath: testPath })
-    await (db as any).ensureDirectoryExists()
+    await (db as unknown as { ensureDirectoryExists(): Promise<void> }).ensureDirectoryExists()
   })
 
   afterEach(async () => {
     try {
       await fs.rm(testPath, { recursive: true, force: true })
-    } catch (error) {
+    } catch {
       // Ignore cleanup errors
     }
   })

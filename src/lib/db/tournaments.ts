@@ -184,6 +184,7 @@ export class TournamentDB extends BaseDB<Tournament> {
   /**
    * Add a player to tournament
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async addPlayer(tournamentId: string, _playerId: string): Promise<Tournament> {
     const tournament = await this.findById(tournamentId)
     if (!tournament) {
@@ -206,6 +207,7 @@ export class TournamentDB extends BaseDB<Tournament> {
   /**
    * Remove a player from tournament
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async removePlayer(tournamentId: string, _playerId: string): Promise<Tournament> {
     const tournament = await this.findById(tournamentId)
     if (!tournament) {

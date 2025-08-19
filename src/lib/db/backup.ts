@@ -375,8 +375,8 @@ export class BackupManager {
         return acc
       }, {} as Record<string, BackupMetadata[]>)
 
-      // Clean up each entity's backups
-      for (const [entityId, entityBackups] of Object.entries(backupsByEntity)) {
+      // Clean up each entity's backups  
+      for (const [, entityBackups] of Object.entries(backupsByEntity)) {
         // Sort by timestamp (newest first)
         entityBackups.sort((a, b) => 
           new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()

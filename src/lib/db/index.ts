@@ -81,7 +81,6 @@ export type {
 } from '@/types'
 
 // Import required classes for DatabaseManager
-import { BaseDB } from './base'
 import { TournamentDB, tournamentDB } from './tournaments'
 import { PlayerDB, playerDB } from './players'
 import { MatchDB, matchDB } from './matches'
@@ -113,7 +112,11 @@ export class DatabaseManager {
     const databases = [this.tournaments, this.players, this.matches, this.courts]
     
     await Promise.all(
-      databases.map(db => (db as any).ensureDirectoryExists())
+      databases.map(db => {
+        // All database classes have ensureDirectoryExists method (protected)
+        const dbWithEnsure = db as unknown as { ensureDirectoryExists(): Promise<void> }
+        return dbWithEnsure.ensureDirectoryExists()
+      })
     )
   }
 
@@ -135,7 +138,7 @@ export class DatabaseManager {
     }
   }> {
     const result = {
-      status: 'healthy' as const,
+      status: 'healthy' as 'healthy' | 'degraded' | 'unhealthy',
       databases: {
         tournaments: { status: 'unknown', count: 0 },
         players: { status: 'unknown', count: 0 },
@@ -180,7 +183,7 @@ export class DatabaseManager {
       const backupStats = await this.backup.getBackupStats()
       result.backup = {
         status: 'healthy',
-        lastBackup: backupStats.newestBackup,
+        ...(backupStats.newestBackup && { lastBackup: backupStats.newestBackup }),
         totalSize: backupStats.totalSize
       }
     } catch (error) {
@@ -420,7 +423,11 @@ export class DatabaseManager {
       description: 'Annual spring tournament for all skill levels',
       location: 'Main Field',
       organizer: 'Tournament Committee',
-      maxPlayers: 16
+      maxPlayers: 16,
+      settings: {
+        allowLateRegistration: true,
+        automaticBracketGeneration: true
+      }
     })
 
     console.log('Sample data seeded successfully:', {

@@ -39,7 +39,7 @@ describe('BaseDB', () => {
     // Clean up test data
     try {
       await fs.rm(testPath, { recursive: true, force: true })
-    } catch (error) {
+    } catch {
       // Ignore cleanup errors
     }
   })
@@ -59,9 +59,9 @@ describe('BaseDB', () => {
     })
 
     it('should validate data before creation', async () => {
-      const invalidData = { name: 'Test', value: 'not a number' }
+      const invalidData = { name: 'Test', value: 'not a number' as unknown as number }
       
-      await expect(db.create(invalidData as any)).rejects.toThrow(ValidationError)
+      await expect(db.create(invalidData)).rejects.toThrow(ValidationError)
     })
 
     it('should save record to file system', async () => {
@@ -170,16 +170,15 @@ describe('BaseDB', () => {
     it('should validate updated data', async () => {
       const created = await db.create({ name: 'Test', value: 1 })
       
-      await expect(db.update(created.id, { value: 'invalid' as any }))
+      await expect(db.update(created.id, { value: 'invalid' as unknown as number }))
         .rejects.toThrow(ValidationError)
     })
 
     it('should preserve ID even if provided in update data', async () => {
       const created = await db.create({ name: 'Test', value: 1 })
       const updated = await db.update(created.id, { 
-        id: 'different-id', 
         name: 'Updated' 
-      } as any)
+      })
 
       expect(updated.id).toBe(created.id)
       expect(updated.name).toBe('Updated')
@@ -300,7 +299,6 @@ describe('BaseDB', () => {
 
     it('should wrap unknown errors in DatabaseError', async () => {
       // Mock file system error
-      const originalReadFile = fs.readFile
       jest.spyOn(fs, 'readFile').mockRejectedValueOnce(new Error('Mock error'))
 
       const created = await db.create({ name: 'Test', value: 1 })
@@ -308,7 +306,7 @@ describe('BaseDB', () => {
       await expect(db.findById(created.id)).rejects.toThrow(DatabaseError)
       
       // Restore original function
-      ;(fs.readFile as jest.Mock).mockRestore()
+      jest.restoreAllMocks()
     })
   })
 
@@ -317,8 +315,9 @@ describe('BaseDB', () => {
       const db1 = new TestDB()
       const db2 = new TestDB()
       
-      const id1 = (db1 as any).generateId()
-      const id2 = (db2 as any).generateId()
+      // Access protected method through casting
+      const id1 = (db1 as unknown as { generateId(): string }).generateId()
+      const id2 = (db2 as unknown as { generateId(): string }).generateId()
       
       expect(id1).toBeDefined()
       expect(id2).toBeDefined()
@@ -328,13 +327,13 @@ describe('BaseDB', () => {
     })
 
     it('should generate correct file paths', async () => {
-      const path = (db as any).getFilePath('test-id')
+      const path = (db as unknown as { getFilePath(id: string): string }).getFilePath('test-id')
       expect(path).toBe(join(testPath, 'test-id.json'))
     })
 
     it('should add timestamps correctly', async () => {
       const data = { name: 'Test', value: 1 }
-      const timestamped = (db as any).addTimestamps(data)
+      const timestamped = (db as unknown as { addTimestamps(data: unknown): TestEntity }).addTimestamps(data)
       
       expect(timestamped.id).toBeDefined()
       expect(timestamped.createdAt).toBeDefined()
@@ -345,13 +344,14 @@ describe('BaseDB', () => {
 
     it('should match filters correctly', async () => {
       const record = { name: 'Test Item', value: 42, id: '1', createdAt: '2024-01-01', updatedAt: '2024-01-01' }
+      const matchesFilters = (db as unknown as { matchesFilters(record: TestEntity, filters?: Record<string, unknown>): boolean }).matchesFilters
       
-      expect((db as any).matchesFilters(record, {})).toBe(true)
-      expect((db as any).matchesFilters(record, { name: 'test' })).toBe(true)
-      expect((db as any).matchesFilters(record, { value: 42 })).toBe(true)
-      expect((db as any).matchesFilters(record, { value: [40, 42, 44] })).toBe(true)
-      expect((db as any).matchesFilters(record, { name: 'other' })).toBe(false)
-      expect((db as any).matchesFilters(record, { value: 99 })).toBe(false)
+      expect(matchesFilters(record, {})).toBe(true)
+      expect(matchesFilters(record, { name: 'test' })).toBe(true)
+      expect(matchesFilters(record, { value: 42 })).toBe(true)
+      expect(matchesFilters(record, { value: [40, 42, 44] })).toBe(true)
+      expect(matchesFilters(record, { name: 'other' })).toBe(false)
+      expect(matchesFilters(record, { value: 99 })).toBe(false)
     })
   })
 })

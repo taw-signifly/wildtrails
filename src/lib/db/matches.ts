@@ -1,6 +1,6 @@
 import { BaseDB, DatabaseConfig, RecordNotFoundError } from './base'
 import { Match, MatchStatus, Score, End, BracketType, Team } from '@/types'
-import { MatchSchema, ScoreSchema, EndSchema } from '@/lib/validation/match'
+import { MatchSchema, MatchFormDataSchema, ScoreSchema, EndSchema } from '@/lib/validation/match'
 
 /**
  * Match-specific database operations
