@@ -28,10 +28,12 @@ export class RecordNotFoundError extends DatabaseError {
 }
 
 export class FileOperationError extends DatabaseError {
+  public readonly originalCause: Error
+  
   constructor(operation: string, filePath: string, cause: Error) {
     super(`Failed to ${operation} file at ${filePath}: ${cause.message}`)
     this.name = 'FileOperationError'
-    this.cause = cause
+    this.originalCause = cause
   }
 }
 

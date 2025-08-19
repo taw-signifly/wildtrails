@@ -100,10 +100,9 @@ export class PlayerDB extends BaseDB<Player> {
   /**
    * Find players participating in a tournament
    */
-  async findByTournament(tournamentId: string): Promise<Player[]> {
+  async findByTournament(_tournamentId: string): Promise<Player[]> {
     // This would typically query a junction table or tournament-player relationship
     // For now, we'll implement a basic version that could be extended
-    const players = await this.findAll()
     
     // This is a placeholder - in a real implementation, you'd check tournament registrations
     // For now, return empty array as tournament-player relationships would be handled separately
@@ -354,7 +353,7 @@ export class PlayerDB extends BaseDB<Player> {
   /**
    * Get inactive players (no recent matches)
    */
-  async getInactivePlayers(daysSinceLastMatch: number = 90): Promise<Player[]> {
+  async getInactivePlayers(_daysSinceLastMatch: number = 90): Promise<Player[]> {
     // This would typically check last match date from match history
     // For now, we'll use a simple heuristic based on empty recent form
     const players = await this.findAll()

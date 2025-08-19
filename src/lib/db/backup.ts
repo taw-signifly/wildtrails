@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs'
-import { join, basename, dirname } from 'path'
+import { join, basename } from 'path'
 import { DatabaseError, FileOperationError } from './base'
 
 /**

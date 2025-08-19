@@ -208,7 +208,9 @@ export const CourtSchema = z.object({
   status: z.enum(['available', 'in-use', 'maintenance', 'reserved']),
   currentMatch: z.string().min(1).optional(), // match ID
   nextMatch: z.string().min(1).optional(),    // match ID
-  amenities: z.array(z.string().max(50)).max(20)
+  amenities: z.array(z.string().max(50)).max(20),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
 })
 
 // Real-time Event Schemas

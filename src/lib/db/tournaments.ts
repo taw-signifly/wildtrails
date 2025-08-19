@@ -184,7 +184,7 @@ export class TournamentDB extends BaseDB<Tournament> {
   /**
    * Add a player to tournament
    */
-  async addPlayer(tournamentId: string, playerId: string): Promise<Tournament> {
+  async addPlayer(tournamentId: string, _playerId: string): Promise<Tournament> {
     const tournament = await this.findById(tournamentId)
     if (!tournament) {
       throw new Error(`Tournament with ID ${tournamentId} not found`)
@@ -206,7 +206,7 @@ export class TournamentDB extends BaseDB<Tournament> {
   /**
    * Remove a player from tournament
    */
-  async removePlayer(tournamentId: string, playerId: string): Promise<Tournament> {
+  async removePlayer(tournamentId: string, _playerId: string): Promise<Tournament> {
     const tournament = await this.findById(tournamentId)
     if (!tournament) {
       throw new Error(`Tournament with ID ${tournamentId} not found`)

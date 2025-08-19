@@ -1,6 +1,6 @@
 import { BaseDB, DatabaseConfig, RecordNotFoundError } from './base'
-import { Match, MatchStatus, MatchFormData, Score, End, BracketType, Team } from '@/types'
-import { MatchSchema, MatchFormDataSchema, ScoreSchema, EndSchema } from '@/lib/validation/match'
+import { Match, MatchStatus, Score, End, BracketType, Team } from '@/types'
+import { MatchSchema, ScoreSchema, EndSchema } from '@/lib/validation/match'
 
 /**
  * Match-specific database operations
@@ -551,11 +551,11 @@ export class MatchDB extends BaseDB<Match> {
    */
   async bulkCreate(matchesData: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>[]): Promise<{
     successful: Match[]
-    failed: { data: any; error: string }[]
+    failed: { data: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>; error: string }[]
   }> {
     const result = {
       successful: [] as Match[],
-      failed: [] as { data: any; error: string }[]
+      failed: [] as { data: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>; error: string }[]
     }
 
     for (const matchData of matchesData) {

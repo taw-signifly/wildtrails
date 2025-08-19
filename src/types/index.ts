@@ -186,6 +186,8 @@ export interface Court {
   currentMatch?: string // match ID
   nextMatch?: string // match ID
   amenities: string[]
+  createdAt: string
+  updatedAt: string
 }
 
 export interface CourtDimensions {

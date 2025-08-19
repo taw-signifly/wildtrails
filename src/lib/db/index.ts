@@ -80,6 +80,13 @@ export type {
   BracketType
 } from '@/types'
 
+// Import required classes for DatabaseManager
+import { TournamentDB, tournamentDB } from './tournaments'
+import { PlayerDB, playerDB } from './players'
+import { MatchDB, matchDB } from './matches'
+import { CourtDB, courtDB } from './courts'
+import { BackupManager, backupManager } from './backup'
+
 /**
  * Database Manager - Central coordinator for all database operations
  */
@@ -105,7 +112,7 @@ export class DatabaseManager {
     const databases = [this.tournaments, this.players, this.matches, this.courts]
     
     await Promise.all(
-      databases.map(db => (db as any).ensureDirectoryExists())
+      databases.map(db => (db as BaseDB<any>).ensureDirectoryExists())
     )
   }
 
@@ -228,13 +235,11 @@ export class DatabaseManager {
     const [
       tournamentStats,
       playerStats,
-      matchStats,
       courtStats,
       backupStats
     ] = await Promise.all([
       this.tournaments.getStatsSummary(),
       this.players.getStatsSummary(),
-      this.tournaments.count(), // Placeholder for match stats
       this.courts.getUtilizationStats(),
       this.backup.getBackupStats()
     ])
@@ -467,9 +472,7 @@ export const DatabaseUtils = {
 }
 
 // Type exports for external usage
-export type {
-  DatabaseManager
-}
+export type DatabaseManagerType = DatabaseManager
 
 // Default export for convenience
 export default db
