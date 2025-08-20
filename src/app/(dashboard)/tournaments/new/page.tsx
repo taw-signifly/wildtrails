@@ -11,8 +11,10 @@ export default function NewTournamentPage() {
       <PageHeader
         title="Create Tournament"
         description="Set up a new Petanque tournament with customizable settings and player registration"
-        showBackButton
-        backHref="/"
+        breadcrumbs={[
+          { label: "Dashboard", href: "/" },
+          { label: "Create Tournament" }
+        ]}
       />
 
       <div className="mx-auto max-w-4xl">
