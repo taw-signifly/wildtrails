@@ -25,7 +25,7 @@ export class SingleEliminationHandler extends BaseFormatHandler {
   async generateBracket(
     tournament: Tournament,
     teams: Team[],
-    options: BracketGenerationOptions
+    _options: BracketGenerationOptions
   ): Promise<BracketResult> {
     // Validate input
     const validation = this.validateInput(tournament, teams)
@@ -174,7 +174,7 @@ export class SingleEliminationHandler extends BaseFormatHandler {
     })
 
     // Convert to rankings
-    const rankings: TeamRanking[] = Array.from(teamStats.values()).map((stats, index) => ({
+    const rankings: TeamRanking[] = Array.from(teamStats.values()).map((stats) => ({
       rank: 0, // Will be calculated below
       team: stats.team,
       wins: stats.wins,
@@ -217,7 +217,7 @@ export class SingleEliminationHandler extends BaseFormatHandler {
   }
 
   isComplete(tournament: Tournament, matches: Match[]): boolean {
-    const completedMatches = matches.filter(m => m.status === 'completed')
+    // const completedMatches = matches.filter(m => m.status === 'completed')
     const finalMatch = matches.find(m => this.isFinalMatch(m, matches))
     
     return finalMatch ? finalMatch.status === 'completed' : false
@@ -263,7 +263,7 @@ export class SingleEliminationHandler extends BaseFormatHandler {
     for (let round = 1; round <= totalRounds; round++) {
       const roundNodes = bracketStructure.filter(node => node.round === round)
       
-      roundNodes.forEach((node, index) => {
+      roundNodes.forEach((_node) => {
         const match: Omit<Match, 'id' | 'createdAt' | 'updatedAt'> = {
           tournamentId: tournament.id,
           round,
@@ -336,7 +336,7 @@ export class SingleEliminationHandler extends BaseFormatHandler {
   private advanceWinner(
     nextRoundMatch: Match,
     winner: Team,
-    completedMatch: Match
+    _completedMatch: Match
   ): Match {
     // Determine which position the winner should take in the next match
     const updatedMatch = { ...nextRoundMatch }

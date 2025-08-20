@@ -11,6 +11,18 @@ import {
   BracketMetadata
 } from '../types'
 
+interface TeamStats {
+  team: Team
+  wins: number
+  losses: number
+  draws: number
+  points: number
+  goalsFor: number
+  goalsAgainst: number
+  goalDifferential: number
+  headToHead: Map<string, { wins: number; losses: number; draws: number }>
+}
+
 export class RoundRobinHandler extends BaseFormatHandler {
   readonly formatType: TournamentType = 'round-robin'
   readonly constraints: FormatConstraints = {
@@ -25,7 +37,7 @@ export class RoundRobinHandler extends BaseFormatHandler {
   async generateBracket(
     tournament: Tournament,
     teams: Team[],
-    options: BracketGenerationOptions
+    _options: BracketGenerationOptions
   ): Promise<BracketResult> {
     // Validate input
     const validation = this.validateInput(tournament, teams)
@@ -129,17 +141,7 @@ export class RoundRobinHandler extends BaseFormatHandler {
     tournament: Tournament,
     matches: Match[]
   ): Promise<Standings> {
-    const teamStats = new Map<string, {
-      team: Team
-      wins: number
-      losses: number
-      draws: number
-      points: number
-      goalsFor: number
-      goalsAgainst: number
-      goalDifferential: number
-      headToHead: Map<string, { wins: number; losses: number; draws: number }>
-    }>()
+    const teamStats = new Map<string, TeamStats>()
 
     // Initialize all teams
     const allTeams = this.extractAllTeams(matches)
@@ -482,7 +484,7 @@ export class RoundRobinHandler extends BaseFormatHandler {
     
     matches.forEach((match, index) => {
       const isGroupMatch = match.roundName?.includes('Group')
-      const isPlayoffMatch = match.roundName?.includes('Playoff')
+      // const isPlayoffMatch = match.roundName?.includes('Playoff')
       
       const node: BracketNode = {
         id: isGroupMatch ? `rr-group-${index}` : `rr-playoff-${index}`,
@@ -519,8 +521,8 @@ export class RoundRobinHandler extends BaseFormatHandler {
   }
 
   private calculateTieBreaker(
-    stats: any,
-    allStats: Map<string, any>
+    stats: TeamStats,
+    _allStats: Map<string, TeamStats>
   ): number {
     // For round-robin, tie-breaker is typically points, then goal differential
     return stats.points * 1000 + stats.goalDifferential
@@ -529,7 +531,7 @@ export class RoundRobinHandler extends BaseFormatHandler {
   private compareHeadToHead(
     teamA: Team,
     teamB: Team,
-    teamStats: Map<string, any>
+    teamStats: Map<string, TeamStats>
   ): number {
     const statsA = teamStats.get(teamA.id)
     const statsB = teamStats.get(teamB.id)

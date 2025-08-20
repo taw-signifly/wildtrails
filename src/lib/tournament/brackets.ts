@@ -11,7 +11,8 @@ import {
   Standings, 
   BracketGenerationOptions,
   SeedingOptions,
-  ValidatorResult
+  ValidatorResult,
+  FormatConstraints
 } from './types'
 
 export class BracketGenerator {
@@ -164,7 +165,7 @@ export class BracketGenerator {
     type: TournamentType
     name: string
     description: string
-    constraints: any
+    constraints: FormatConstraints
   }> {
     return Array.from(this.formatHandlers.entries()).map(([type, handler]) => ({
       type,
@@ -206,7 +207,7 @@ export class BracketGenerator {
   estimateTournamentDuration(
     tournament: Tournament,
     teams: Team[],
-    options?: Partial<BracketGenerationOptions>
+    _options?: Partial<BracketGenerationOptions>
   ): {
     estimatedMatches: number
     estimatedDuration: number // minutes
@@ -217,8 +218,9 @@ export class BracketGenerator {
       total: number
     }
   } {
-    const handler = this.getFormatHandler(tournament.type)
-    const fullOptions = this.mergeWithDefaults(options)
+    // Note: handler and fullOptions could be used for more sophisticated duration calculations
+    // const handler = this.getFormatHandler(tournament.type)
+    // const fullOptions = this.mergeWithDefaults(options)
     
     // Calculate based on format
     let estimatedMatches = 0

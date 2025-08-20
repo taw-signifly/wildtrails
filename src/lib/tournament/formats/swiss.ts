@@ -42,7 +42,7 @@ export class SwissSystemHandler extends BaseFormatHandler {
   async generateBracket(
     tournament: Tournament,
     teams: Team[],
-    options: BracketGenerationOptions
+    _options: BracketGenerationOptions
   ): Promise<BracketResult> {
     // Validate input
     const validation = this.validateInput(tournament, teams)
@@ -549,7 +549,7 @@ export class SwissSystemHandler extends BaseFormatHandler {
 
   private calculateBuchholz(
     teamStats: Map<string, SwissTeamStats>,
-    matches: Match[]
+    _matches: Match[]
   ): void {
     teamStats.forEach(stats => {
       let buchholzSum = 0

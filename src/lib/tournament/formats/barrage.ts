@@ -36,7 +36,7 @@ export class BarrageHandler extends BaseFormatHandler {
   async generateBracket(
     tournament: Tournament,
     teams: Team[],
-    options: BracketGenerationOptions
+    _options: BracketGenerationOptions
   ): Promise<BracketResult> {
     // Validate input
     const validation = this.validateInput(tournament, teams)
@@ -441,7 +441,7 @@ export class BarrageHandler extends BaseFormatHandler {
     const qualifiedTeams: TeamRanking[] = []
     const eliminatedTeams: TeamRanking[] = []
     
-    teamStatuses.forEach((status, teamId) => {
+    teamStatuses.forEach((status) => {
       const ranking: TeamRanking = {
         rank: 0, // Will be calculated
         team: status.team,

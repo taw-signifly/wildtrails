@@ -3,12 +3,11 @@
 import { revalidatePath } from 'next/cache'
 import { matchDB } from '@/lib/db/matches'
 import { tournamentDB } from '@/lib/db/tournaments'
-import { resultToActionResult } from '@/lib/api/action-utils'
-import { broadcastBracketUpdate, broadcastTournamentUpdate } from '@/lib/api/sse'
+import { broadcastBracketUpdate } from '@/lib/api/sse'
 import { Match, Tournament, BracketType, TournamentType, Team } from '@/types'
 import { ActionResult } from '@/types/actions'
 import { BracketGenerator } from '@/lib/tournament'
-import type { BracketGenerationOptions, SeedingOptions } from '@/lib/tournament/types'
+import type { BracketGenerationOptions, TeamRanking, TieBreaker, StandingsMetadata } from '@/lib/tournament/types'
 
 /**
  * Bracket node interface for tournament structure
@@ -345,11 +344,30 @@ export async function getBracketStructure(tournamentId: string): Promise<ActionR
       }
     }
     
-    const bracketStructure = await getCurrentBracketStructure(tournamentId)
+    // Get tournament details
+    const tournamentResult = await tournamentDB.findById(tournamentId)
+    if (tournamentResult.error || !tournamentResult.data) {
+      return {
+        success: false,
+        error: 'Tournament not found'
+      }
+    }
+    
+    // Get all matches for this tournament
+    const matchesResult = await matchDB.findByTournament(tournamentId)
+    if (matchesResult.error) {
+      return {
+        success: false,
+        error: 'Failed to retrieve tournament matches'
+      }
+    }
+    
+    // Build bracket structure from matches
+    const bracketNodes = buildBracketNodesFromMatches(matchesResult.data)
     
     return {
       success: true,
-      data: bracketStructure
+      data: bracketNodes
     }
     
   } catch (error) {
@@ -448,9 +466,9 @@ export async function getBracketResults(
 export async function calculateTournamentStandings(
   tournamentId: string
 ): Promise<ActionResult<{
-  rankings: any[]
-  tieBreakers: any[]
-  metadata: any
+  rankings: TeamRanking[]
+  tieBreakers: TieBreaker[]
+  metadata: StandingsMetadata
 }>> {
   try {
     if (!tournamentId) {
@@ -502,439 +520,38 @@ export async function calculateTournamentStandings(
   }
 }
 
-// Helper functions for different bracket types
-
-function generateSingleEliminationMatches(
-  tournamentId: string,
-  teams: Team[],
-  tournament: Tournament
-): { matches: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>[]; bracketStructure: BracketNode[] } {
-  const matches: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>[] = []
-  const bracketStructure: BracketNode[] = []
+/**
+ * Build bracket node structure from matches
+ */
+function buildBracketNodesFromMatches(matches: Match[]): BracketNode[] {
+  const bracketNodes: BracketNode[] = []
   
-  // Calculate number of rounds needed
-  const totalTeams = teams.length
-  const rounds = Math.ceil(Math.log2(totalTeams))
-  
-  // First round matches
-  const currentRound = 1
-  let matchPosition = 1
-  
-  for (let i = 0; i < teams.length; i += 2) {
-    if (i + 1 < teams.length) {
-      const match: Omit<Match, 'id' | 'createdAt' | 'updatedAt'> = {
-        tournamentId,
-        round: currentRound,
-        roundName: currentRound === rounds ? 'Final' : 
-                   currentRound === rounds - 1 ? 'Semifinal' : 
-                   currentRound === rounds - 2 ? 'Quarterfinal' : 
-                   `Round ${currentRound}`,
-        bracketType: 'winner',
-        team1: teams[i],
-        team2: teams[i + 1],
-        score: { team1: 0, team2: 0, isComplete: false },
-        status: 'scheduled',
-        ends: []
-      }
-      matches.push(match)
-      
-      const node: BracketNode = {
-        id: `bracket-${currentRound}-${matchPosition}`,
-        team1: teams[i],
-        team2: teams[i + 1],
-        round: currentRound,
-        position: matchPosition,
-        bracketType: 'winner'
-      }
-      bracketStructure.push(node)
-      matchPosition++
+  // Sort matches by round and position for proper bracket order
+  const sortedMatches = matches.sort((a, b) => {
+    // Sort by round first, then by position/bracket order
+    if (a.round !== b.round) {
+      return a.round - b.round
     }
-  }
-  
-  return { matches, bracketStructure }
-}
-
-function generateDoubleEliminationMatches(
-  tournamentId: string,
-  teams: Team[],
-  tournament: Tournament
-): { matches: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>[]; bracketStructure: BracketNode[] } {
-  // For now, start with winners bracket like single elimination
-  // TODO: Implement full double elimination logic with losers bracket
-  return generateSingleEliminationMatches(tournamentId, teams, tournament)
-}
-
-function generateRoundRobinMatches(
-  tournamentId: string,
-  teams: Team[],
-  tournament: Tournament
-): { matches: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>[]; bracketStructure: BracketNode[] } {
-  const matches: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>[] = []
-  const bracketStructure: BracketNode[] = []
-  
-  let matchPosition = 1
-  
-  // Generate all possible pairings
-  for (let i = 0; i < teams.length; i++) {
-    for (let j = i + 1; j < teams.length; j++) {
-      const match: Omit<Match, 'id' | 'createdAt' | 'updatedAt'> = {
-        tournamentId,
-        round: 1,
-        roundName: 'Round Robin',
-        bracketType: 'winner',
-        team1: teams[i],
-        team2: teams[j],
-        score: { team1: 0, team2: 0, isComplete: false },
-        status: 'scheduled',
-        ends: []
-      }
-      matches.push(match)
-      
-      const node: BracketNode = {
-        id: `bracket-rr-${matchPosition}`,
-        team1: teams[i],
-        team2: teams[j],
-        round: 1,
-        position: matchPosition,
-        bracketType: 'winner'
-      }
-      bracketStructure.push(node)
-      matchPosition++
-    }
-  }
-  
-  return { matches, bracketStructure }
-}
-
-function generateSwissSystemMatches(
-  tournamentId: string,
-  teams: Team[],
-  tournament: Tournament,
-  round: number
-): { matches: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>[]; bracketStructure: BracketNode[] } {
-  const matches: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>[] = []
-  const bracketStructure: BracketNode[] = []
-  
-  // For first round, do random pairings
-  // TODO: Implement proper Swiss pairing algorithm for subsequent rounds
-  let matchPosition = 1
-  
-  for (let i = 0; i < teams.length; i += 2) {
-    if (i + 1 < teams.length) {
-      const match: Omit<Match, 'id' | 'createdAt' | 'updatedAt'> = {
-        tournamentId,
-        round,
-        roundName: `Swiss Round ${round}`,
-        bracketType: 'winner',
-        team1: teams[i],
-        team2: teams[i + 1],
-        score: { team1: 0, team2: 0, isComplete: false },
-        status: 'scheduled',
-        ends: []
-      }
-      matches.push(match)
-      
-      const node: BracketNode = {
-        id: `bracket-swiss-${round}-${matchPosition}`,
-        team1: teams[i],
-        team2: teams[i + 1],
-        round,
-        position: matchPosition,
-        bracketType: 'winner'
-      }
-      bracketStructure.push(node)
-      matchPosition++
-    }
-  }
-  
-  return { matches, bracketStructure }
-}
-
-async function updateSingleEliminationProgression(
-  match: Match,
-  tournament: Tournament
-): Promise<{ affectedMatches: Match[]; bracketStructure: BracketNode[]; nextRoundMatches: Match[] }> {
-  const affectedMatches: Match[] = [match]
-  const nextRoundMatches: Match[] = []
-  
-  try {
-    // Only proceed if match is completed and has a winner
-    if (match.status !== 'completed' || !match.winner) {
-      return {
-        affectedMatches,
-        bracketStructure: await getCurrentBracketStructure(tournament.id),
-        nextRoundMatches
-      }
-    }
-
-    // Find next round match where this winner should advance
-    const allMatchesResult = await matchDB.findByTournament(tournament.id)
-    if (allMatchesResult.error || !allMatchesResult.data) {
-      return {
-        affectedMatches,
-        bracketStructure: await getCurrentBracketStructure(tournament.id),
-        nextRoundMatches
-      }
-    }
-
-    const allMatches = allMatchesResult.data
-    
-    // Find the next round match that should receive this winner
-    // In single elimination, winner advances to next round
-    const nextRound = match.round + 1
-    const nextRoundMatch = allMatches.find(m => 
-      m.round === nextRound && 
-      (!m.team1 || !m.team2) &&
-      m.status === 'scheduled'
-    )
-
-    // Note: In a real implementation, bracket progression would be handled by 
-    // specialized tournament management logic that knows how to properly
-    // advance teams with full Team objects. For now, we log the progression
-    // and let the tournament organizer manually set up the next round.
-    
-    if (nextRoundMatch) {
-      console.log(`Winner ${match.winner} should advance to match ${nextRoundMatch.id}`)
-      
-      // In a real system, you would:
-      // 1. Load the full Team object for the winner
-      // 2. Update the next round match with the complete Team data
-      // 3. Handle bracket structure updates
-      
-      // For now, we just track that progression is needed
-      nextRoundMatches.push(nextRoundMatch)
-    }
-
-    return {
-      affectedMatches,
-      bracketStructure: await getCurrentBracketStructure(tournament.id),
-      nextRoundMatches
-    }
-  } catch (error) {
-    console.error('Error updating single elimination progression:', error)
-    return {
-      affectedMatches,
-      bracketStructure: await getCurrentBracketStructure(tournament.id),
-      nextRoundMatches
-    }
-  }
-}
-
-async function updateDoubleEliminationProgression(
-  match: Match,
-  tournament: Tournament
-): Promise<{ affectedMatches: Match[]; bracketStructure: BracketNode[]; nextRoundMatches: Match[] }> {
-  const affectedMatches: Match[] = [match]
-  const nextRoundMatches: Match[] = []
-  
-  try {
-    // Only proceed if match is completed and has a winner
-    if (match.status !== 'completed' || !match.winner) {
-      return {
-        affectedMatches,
-        bracketStructure: await getCurrentBracketStructure(tournament.id),
-        nextRoundMatches
-      }
-    }
-
-    // Get all tournament matches
-    const allMatchesResult = await matchDB.findByTournament(tournament.id)
-    if (allMatchesResult.error || !allMatchesResult.data) {
-      return {
-        affectedMatches,
-        bracketStructure: await getCurrentBracketStructure(tournament.id),
-        nextRoundMatches
-      }
-    }
-
-    const allMatches = allMatchesResult.data
-    
-    // In double elimination: winner advances to winners bracket, loser to losers bracket
-    if (match.bracketType === 'winner') {
-      // Winner advances in winners bracket
-      const nextWinnerMatch = allMatches.find(m => 
-        m.round === match.round + 1 && 
-        m.bracketType === 'winner' &&
-        (!m.team1 || !m.team2) &&
-        m.status === 'scheduled'
-      )
-      
-      if (nextWinnerMatch) {
-        console.log(`Winner ${match.winner} should advance to winners bracket match ${nextWinnerMatch.id}`)
-        nextRoundMatches.push(nextWinnerMatch)
-      }
-      
-      // Loser drops to losers bracket
-      const nextLoserMatch = allMatches.find(m => 
-        m.bracketType === 'loser' &&
-        (!m.team1 || !m.team2) &&
-        m.status === 'scheduled'
-      )
-      
-      if (nextLoserMatch) {
-        const loserId = match.team1.id === match.winner ? match.team2.id : match.team1.id
-        console.log(`Loser ${loserId} should drop to losers bracket match ${nextLoserMatch.id}`)
-        nextRoundMatches.push(nextLoserMatch)
-      }
-    } else if (match.bracketType === 'loser') {
-      // Winner advances in losers bracket, loser is eliminated
-      const nextLoserMatch = allMatches.find(m => 
-        m.round === match.round + 1 && 
-        m.bracketType === 'loser' &&
-        (!m.team1 || !m.team2) &&
-        m.status === 'scheduled'
-      )
-      
-      if (nextLoserMatch) {
-        console.log(`Winner ${match.winner} should advance in losers bracket to match ${nextLoserMatch.id}`)
-        nextRoundMatches.push(nextLoserMatch)
-      }
-    }
-
-    return {
-      affectedMatches,
-      bracketStructure: await getCurrentBracketStructure(tournament.id),
-      nextRoundMatches
-    }
-  } catch (error) {
-    console.error('Error updating double elimination progression:', error)
-    return {
-      affectedMatches,
-      bracketStructure: await getCurrentBracketStructure(tournament.id),
-      nextRoundMatches
-    }
-  }
-}
-
-async function updateSwissSystemProgression(
-  match: Match,
-  tournament: Tournament
-): Promise<{ affectedMatches: Match[]; bracketStructure: BracketNode[]; nextRoundMatches: Match[] }> {
-  const affectedMatches: Match[] = [match]
-  const nextRoundMatches: Match[] = []
-  
-  try {
-    // Only proceed if match is completed and has a winner
-    if (match.status !== 'completed' || !match.winner) {
-      return {
-        affectedMatches,
-        bracketStructure: await getCurrentBracketStructure(tournament.id),
-        nextRoundMatches
-      }
-    }
-
-    // Get all tournament matches to calculate standings
-    const allMatchesResult = await matchDB.findByTournament(tournament.id)
-    if (allMatchesResult.error || !allMatchesResult.data) {
-      return {
-        affectedMatches,
-        bracketStructure: await getCurrentBracketStructure(tournament.id),
-        nextRoundMatches
-      }
-    }
-
-    const allMatches = allMatchesResult.data
-    const completedMatches = allMatches.filter(m => m.status === 'completed')
-    
-    // In Swiss system, we don't create next round matches automatically
-    // Instead, we update team standings and prepare for next round pairing
-    // This would typically be done by tournament organizers using separate pairing algorithms
-    
-    // Calculate current standings for all teams
-    const teamStandings = new Map<string, { wins: number; losses: number; points: number }>()
-    
-    completedMatches.forEach(m => {
-      if (m.team1.id && m.team2.id && m.winner) {
-        // Initialize standings if not exists
-        if (!teamStandings.has(m.team1.id)) {
-          teamStandings.set(m.team1.id, { wins: 0, losses: 0, points: 0 })
-        }
-        if (!teamStandings.has(m.team2.id)) {
-          teamStandings.set(m.team2.id, { wins: 0, losses: 0, points: 0 })
-        }
-        
-        const team1Stats = teamStandings.get(m.team1.id)!
-        const team2Stats = teamStandings.get(m.team2.id)!
-        
-        if (m.winner === m.team1.id) {
-          team1Stats.wins++
-          team2Stats.losses++
-        } else if (m.winner === m.team2.id) {
-          team2Stats.wins++
-          team1Stats.losses++
-        }
-        
-        // Add match points (could be based on score difference in Petanque)
-        team1Stats.points += m.score?.team1 || 0
-        team2Stats.points += m.score?.team2 || 0
-      }
-    })
-    
-    // Check if this is the final round of Swiss system
-    const currentRound = match.round
-    const maxRounds = Math.ceil(Math.log2(teamStandings.size)) // Typical Swiss system rounds
-    
-    if (currentRound >= maxRounds) {
-      // Tournament might be complete, check if we need finals
-      const sortedTeams = Array.from(teamStandings.entries())
-        .sort((a, b) => b[1].wins - a[1].wins || b[1].points - a[1].points)
-      
-      // Top teams might advance to finals (implementation depends on tournament rules)
-      // For now, we just mark the tournament structure as updated
-    }
-
-    return {
-      affectedMatches,
-      bracketStructure: await getCurrentBracketStructure(tournament.id),
-      nextRoundMatches
-    }
-  } catch (error) {
-    console.error('Error updating Swiss system progression:', error)
-    return {
-      affectedMatches,
-      bracketStructure: await getCurrentBracketStructure(tournament.id),
-      nextRoundMatches
-    }
-  }
-}
-
-async function getCurrentBracketStructure(tournamentId: string): Promise<BracketNode[]> {
-  // Get all matches for tournament and build bracket structure
-  const matchesResult = await matchDB.findByTournament(tournamentId)
-  if (matchesResult.error || !matchesResult.data) {
-    return []
-  }
-  
-  const matches = matchesResult.data
-  const bracketStructure: BracketNode[] = []
-  
-  matches.forEach(match => {
-    const node: BracketNode = {
-      id: `bracket-${match.round}-${match.id}`,
-      matchId: match.id,
-      team1: match.team1,
-      team2: match.team2,
-      winner: match.winner,
-      round: match.round,
-      position: 0, // TODO: Calculate proper position
-      bracketType: match.bracketType
-    }
-    bracketStructure.push(node)
+    // Use match ID as fallback for consistent ordering
+    return a.id.localeCompare(b.id)
   })
   
-  return bracketStructure
-}
-
-async function checkTournamentCompletion(tournamentId: string): Promise<boolean> {
-  const matchesResult = await matchDB.findByTournament(tournamentId)
-  if (matchesResult.error || !matchesResult.data) {
-    return false
+  for (const match of sortedMatches) {
+    const bracketNode: BracketNode = {
+      id: match.id,
+      matchId: match.id,
+      round: match.round,
+      position: 0, // Will be calculated based on bracket structure
+      bracketType: match.bracketType,
+      team1: match.team1,
+      team2: match.team2,
+      winner: match.winner
+    }
+    
+    bracketNodes.push(bracketNode)
   }
   
-  const matches = matchesResult.data
-  
-  // Tournament is complete if all matches are completed or cancelled
-  return matches.every(match => 
-    match.status === 'completed' || match.status === 'cancelled'
-  )
+  return bracketNodes
 }
+
+// Note: Legacy helper functions have been removed as they are replaced by the new tournament format system

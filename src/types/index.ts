@@ -453,6 +453,14 @@ export interface CourtUtilizationStats {
   averageMatchesPerCourt: number
 }
 
+// Export Database Error types
+export { 
+  DatabaseError,
+  ValidationError,
+  RecordNotFoundError,
+  FileOperationError
+} from '@/lib/db/base'
+
 // Export all types for easy importing
 export type {
   // Re-export common types for convenience

@@ -27,7 +27,7 @@ export class Seeder {
   /**
    * Rank-based seeding (highest ranked teams get best seeds)
    */
-  private rankedSeeding(teams: Team[], options: SeedingOptions): Team[] {
+  private rankedSeeding(teams: Team[], _options: SeedingOptions): Team[] {
     return teams.sort((a, b) => {
       // Primary sort by ranking (lower ranking number = better)
       const aRanking = this.getTeamRanking(a)
@@ -71,7 +71,7 @@ export class Seeder {
   /**
    * Club-balanced seeding (avoid same club members facing each other early)
    */
-  private clubBalancedSeeding(teams: Team[], options: SeedingOptions): Team[] {
+  private clubBalancedSeeding(teams: Team[], _options: SeedingOptions): Team[] {
     // First, group teams by club
     const clubGroups = new Map<string, Team[]>()
     const noClubTeams: Team[] = []
@@ -135,7 +135,7 @@ export class Seeder {
   /**
    * Geographic seeding (distribute teams from different regions)
    */
-  private geographicSeeding(teams: Team[], options: SeedingOptions): Team[] {
+  private geographicSeeding(teams: Team[], _options: SeedingOptions): Team[] {
     // Group teams by geographic region
     const regionGroups = new Map<string, Team[]>()
     
