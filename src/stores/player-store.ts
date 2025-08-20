@@ -33,6 +33,8 @@ export interface PlayerStoreState {
   // Real-time connection
   isConnected: boolean
   lastUpdated: string | null
+  realtimeSubscription: any
+  tournamentSubscriptions: Map<string, any>
 }
 
 export interface PlayerStoreActions {
@@ -61,8 +63,12 @@ export interface PlayerStoreActions {
   getCurrentPlayerStats: (id: string) => Promise<any>
   
   // Real-time updates
-  startRealTimeUpdates: () => void
+  startRealTimeUpdates: (tournamentId?: string) => void
   stopRealTimeUpdates: () => void
+  
+  // Player event broadcasts
+  broadcastPlayerCheckIn: (playerId: string, tournamentId: string) => void
+  broadcastPlayerTeamJoin: (playerId: string, teamId: string) => void
   
   // Error handling
   clearError: () => void
@@ -96,6 +102,8 @@ export const usePlayerStore = create<PlayerStore>()(
         },
         isConnected: false,
         lastUpdated: null,
+        realtimeSubscription: null,
+        tournamentSubscriptions: new Map(),
 
         // Player CRUD operations
         createPlayer: async (playerData) => {
@@ -378,9 +386,14 @@ export const usePlayerStore = create<PlayerStore>()(
         },
 
         // Real-time updates
-        startRealTimeUpdates: () => {
+        startRealTimeUpdates: (tournamentId?: string) => {
+          // Stop existing subscriptions
+          get().stopRealTimeUpdates()
+          
+          const channelName = tournamentId ? `players_tournament_${tournamentId}` : 'players_all'
+          
           const subscription = supabase
-            .channel('players_changes')
+            .channel(channelName)
             .on('postgres_changes', 
               { event: '*', schema: 'public', table: 'players' }, 
               (payload) => {
@@ -392,19 +405,40 @@ export const usePlayerStore = create<PlayerStore>()(
                   switch (eventType) {
                     case 'INSERT':
                       if (newRecord) {
-                        newPlayers = [newRecord as Player, ...newPlayers]
+                        const player = newRecord as Player
+                        // Only add if not already present and matches filters
+                        if (!newPlayers.find(p => p.id === player.id) && 
+                            (!state.filters.activeOnly || player.is_active)) {
+                          newPlayers = [player, ...newPlayers]
+                        }
                       }
                       break
                     case 'UPDATE':
                       if (newRecord) {
+                        const player = newRecord as Player
                         newPlayers = newPlayers.map(p => 
-                          p.id === newRecord.id ? newRecord as Player : p
+                          p.id === player.id ? player : p
                         )
+                        
+                        // Update current player if it's the same
+                        if (state.currentPlayer?.id === player.id) {
+                          set({ currentPlayer: player })
+                        }
+                        
+                        // Remove from list if no longer matches filters
+                        if (state.filters.activeOnly && !player.is_active) {
+                          newPlayers = newPlayers.filter(p => p.id !== player.id)
+                        }
                       }
                       break
                     case 'DELETE':
                       if (oldRecord) {
                         newPlayers = newPlayers.filter(p => p.id !== oldRecord.id)
+                        
+                        // Clear current player if it was deleted
+                        if (state.currentPlayer?.id === oldRecord.id) {
+                          set({ currentPlayer: null })
+                        }
                       }
                       break
                   }
@@ -417,14 +451,102 @@ export const usePlayerStore = create<PlayerStore>()(
                 })
               }
             )
+            .on('broadcast', 
+              { event: 'player_event' }, 
+              (payload) => {
+                const { type, playerId, data } = payload.payload
+                
+                switch (type) {
+                  case 'player_checked_in':
+                    console.log('Player checked in:', playerId, data)
+                    break
+                  case 'player_team_joined':
+                    console.log('Player joined team:', playerId, data.teamId)
+                    break
+                  case 'player_eliminated':
+                    console.log('Player eliminated:', playerId, data)
+                    break
+                }
+              }
+            )
             .subscribe((status) => {
-              set({ isConnected: status === 'SUBSCRIBED' })
+              set({ 
+                isConnected: status === 'SUBSCRIBED',
+                realtimeSubscription: status === 'SUBSCRIBED' ? subscription : null
+              })
             })
+            
+          // Subscribe to team_members changes if tournamentId provided
+          if (tournamentId) {
+            const teamSubscription = supabase
+              .channel(`team_members_${tournamentId}`)
+              .on('postgres_changes',
+                { event: '*', schema: 'public', table: 'team_members' },
+                (payload) => {
+                  const { eventType, new: newRecord, old: oldRecord } = payload
+                  console.log('Team member change:', eventType, newRecord || oldRecord)
+                  
+                  // This helps track when players join/leave teams in real-time
+                  set({ lastUpdated: new Date().toISOString() })
+                }
+              )
+              .subscribe()
+              
+            set(state => {
+              const newSubscriptions = new Map(state.tournamentSubscriptions)
+              newSubscriptions.set(tournamentId, teamSubscription)
+              return { tournamentSubscriptions: newSubscriptions }
+            })
+          }
         },
 
         stopRealTimeUpdates: () => {
+          const state = get()
+          
+          // Remove all channels
           supabase.removeAllChannels()
-          set({ isConnected: false })
+          
+          // Clear tournament subscriptions
+          state.tournamentSubscriptions.clear()
+          
+          set({ 
+            isConnected: false,
+            realtimeSubscription: null,
+            tournamentSubscriptions: new Map()
+          })
+        },
+        
+        // Player event broadcasts
+        broadcastPlayerCheckIn: (playerId: string, tournamentId: string) => {
+          const state = get()
+          if (!state.realtimeSubscription) return
+          
+          state.realtimeSubscription.send({
+            type: 'broadcast',
+            event: 'player_event',
+            payload: {
+              type: 'player_checked_in',
+              playerId,
+              tournamentId,
+              timestamp: new Date().toISOString()
+            }
+          })
+        },
+        
+        broadcastPlayerTeamJoin: (playerId: string, teamId: string) => {
+          const state = get()
+          if (!state.realtimeSubscription) return
+          
+          state.realtimeSubscription.send({
+            type: 'broadcast',
+            event: 'player_event',
+            payload: {
+              type: 'player_team_joined',
+              playerId,
+              teamId,
+              timestamp: new Date().toISOString()
+            }
+          })
         },
 
         // Error handling
@@ -457,11 +579,12 @@ export const usePlayerStore = create<PlayerStore>()(
       {
         name: 'player-store',
         partialize: (state) => ({
-          // Only persist essential data, not loading states
+          // Only persist essential data, not loading states or real-time connections
           players: state.players.slice(0, 100), // Limit cached players
           currentPlayer: state.currentPlayer,
           filters: state.filters,
           pagination: state.pagination
+          // Don't persist: isConnected, realtimeSubscription, tournamentSubscriptions
         })
       }
     )

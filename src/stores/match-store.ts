@@ -30,6 +30,8 @@ export interface MatchStoreState {
   // Real-time connection
   isConnected: boolean
   lastUpdated: string | null
+  activeLiveScoreSubscriptions: Set<string>
+  realtimeSubscription: any
 }
 
 export interface MatchStoreActions {
@@ -69,8 +71,13 @@ export interface MatchStoreActions {
   getMatchStats: (tournamentId: string) => Promise<any>
   
   // Real-time updates
-  startRealTimeUpdates: () => void
+  startRealTimeUpdates: (tournamentId?: string) => void
   stopRealTimeUpdates: () => void
+  
+  // Live scoring broadcast
+  broadcastLiveScore: (matchId: string, score: any) => void
+  subscribeLiveScoring: (matchId: string) => void
+  unsubscribeLiveScoring: (matchId: string) => void
   
   // Error handling
   clearError: () => void
@@ -100,6 +107,8 @@ export const useMatchStore = create<MatchStore>()(
         selectedTournamentId: null,
         isConnected: false,
         lastUpdated: null,
+        activeLiveScoreSubscriptions: new Set(),
+        realtimeSubscription: null,
 
         // Match CRUD operations
         createMatch: async (matchData) => {
@@ -406,11 +415,21 @@ export const useMatchStore = create<MatchStore>()(
         },
 
         // Real-time updates
-        startRealTimeUpdates: () => {
+        startRealTimeUpdates: (tournamentId?: string) => {
+          // Stop existing subscription
+          get().stopRealTimeUpdates()
+          
+          const channelName = tournamentId ? `matches_${tournamentId}` : 'matches_all'
+          
           const subscription = supabase
-            .channel('matches_changes')
+            .channel(channelName)
             .on('postgres_changes', 
-              { event: '*', schema: 'public', table: 'matches' }, 
+              { 
+                event: '*', 
+                schema: 'public', 
+                table: 'matches',
+                filter: tournamentId ? `tournament_id=eq.${tournamentId}` : undefined
+              }, 
               (payload) => {
                 const { eventType, new: newRecord, old: oldRecord } = payload
                 
@@ -422,8 +441,11 @@ export const useMatchStore = create<MatchStore>()(
                     case 'INSERT':
                       if (newRecord) {
                         const match = newRecord as Match
-                        newMatches = [...newMatches, match]
-                        if (match.status === 'in_progress') {
+                        // Only add if not already present
+                        if (!newMatches.find(m => m.id === match.id)) {
+                          newMatches = [...newMatches, match]
+                        }
+                        if (match.status === 'in_progress' && !newActiveMatches.find(m => m.id === match.id)) {
                           newActiveMatches = [...newActiveMatches, match]
                         }
                       }
@@ -446,12 +468,22 @@ export const useMatchStore = create<MatchStore>()(
                         } else {
                           newActiveMatches = newActiveMatches.filter(m => m.id !== match.id)
                         }
+                        
+                        // Update current match if it's the same
+                        if (state.currentMatch?.id === match.id) {
+                          set({ currentMatch: match })
+                        }
                       }
                       break
                     case 'DELETE':
                       if (oldRecord) {
                         newMatches = newMatches.filter(m => m.id !== oldRecord.id)
                         newActiveMatches = newActiveMatches.filter(m => m.id !== oldRecord.id)
+                        
+                        // Clear current match if it was deleted
+                        if (state.currentMatch?.id === oldRecord.id) {
+                          set({ currentMatch: null })
+                        }
                       }
                       break
                   }
@@ -465,14 +497,116 @@ export const useMatchStore = create<MatchStore>()(
                 })
               }
             )
+            .on('broadcast', 
+              { event: 'match_event' }, 
+              (payload) => {
+                const { type, matchId, data } = payload.payload
+                
+                switch (type) {
+                  case 'match_started':
+                    // Handle match start broadcast
+                    console.log('Match started:', matchId, data)
+                    break
+                  case 'match_completed':
+                    // Handle match completion broadcast
+                    console.log('Match completed:', matchId, data)
+                    break
+                  case 'score_celebration':
+                    // Handle score celebration for real-time UI updates
+                    console.log('Score celebration:', matchId, data)
+                    break
+                }
+              }
+            )
             .subscribe((status) => {
-              set({ isConnected: status === 'SUBSCRIBED' })
+              set({ 
+                isConnected: status === 'SUBSCRIBED',
+                realtimeSubscription: status === 'SUBSCRIBED' ? subscription : null
+              })
             })
         },
 
         stopRealTimeUpdates: () => {
+          const state = get()
+          
+          // Remove all channels
           supabase.removeAllChannels()
-          set({ isConnected: false })
+          
+          // Clear live scoring subscriptions
+          state.activeLiveScoreSubscriptions.clear()
+          
+          set({ 
+            isConnected: false,
+            realtimeSubscription: null,
+            activeLiveScoreSubscriptions: new Set()
+          })
+        },
+        
+        // Live scoring broadcast
+        broadcastLiveScore: (matchId: string, score: any) => {
+          const state = get()
+          if (!state.realtimeSubscription) return
+          
+          // Broadcast live score update
+          state.realtimeSubscription.send({
+            type: 'broadcast',
+            event: 'live_score',
+            payload: {
+              matchId,
+              score,
+              timestamp: new Date().toISOString()
+            }
+          })
+        },
+        
+        subscribeLiveScoring: (matchId: string) => {
+          const state = get()
+          if (state.activeLiveScoreSubscriptions.has(matchId)) return
+          
+          const liveChannel = supabase
+            .channel(`live_scoring_${matchId}`)
+            .on('broadcast', 
+              { event: 'live_score' }, 
+              (payload) => {
+                const { matchId: scoreMatchId, score, timestamp } = payload.payload
+                
+                if (scoreMatchId === matchId) {
+                  // Apply optimistic live score update
+                  set(state => {
+                    const updatedMatches = state.matches.map(m => 
+                      m.id === matchId ? { ...m, score } : m
+                    )
+                    const updatedActiveMatches = state.activeMatches.map(m => 
+                      m.id === matchId ? { ...m, score } : m
+                    )
+                    
+                    return {
+                      matches: updatedMatches,
+                      activeMatches: updatedActiveMatches,
+                      currentMatch: state.currentMatch?.id === matchId 
+                        ? { ...state.currentMatch, score } 
+                        : state.currentMatch,
+                      lastUpdated: timestamp
+                    }
+                  })
+                }
+              }
+            )
+            .subscribe()
+            
+          set(state => ({
+            activeLiveScoreSubscriptions: new Set([...state.activeLiveScoreSubscriptions, matchId])
+          }))
+        },
+        
+        unsubscribeLiveScoring: (matchId: string) => {
+          supabase.removeChannel(`live_scoring_${matchId}`)
+          
+          set(state => {
+            const newSubscriptions = new Set(state.activeLiveScoreSubscriptions)
+            newSubscriptions.delete(matchId)
+            return { activeLiveScoreSubscriptions: newSubscriptions }
+          })
         },
 
         // Error handling
@@ -511,11 +645,12 @@ export const useMatchStore = create<MatchStore>()(
       {
         name: 'match-store',
         partialize: (state) => ({
-          // Only persist essential data, not loading states
+          // Only persist essential data, not loading states or real-time connections
           matches: state.matches.slice(-50), // Keep recent matches
           currentMatch: state.currentMatch,
           filters: state.filters,
           selectedTournamentId: state.selectedTournamentId
+          // Don't persist: isConnected, realtimeSubscription, activeLiveScoreSubscriptions
         })
       }
     )

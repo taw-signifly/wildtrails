@@ -1,6 +1,4 @@
 import { createClient } from '@supabase/supabase-js'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 
 export type Database = {
   public: {
@@ -278,28 +276,11 @@ export type Database = {
   }
 }
 
-// Client-side Supabase client
+// Client-side Supabase client (safe to use in browser)
 export const createClientComponentClient = () => {
   return createClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
-}
-
-// Server-side Supabase client for Server Components
-export const createServerComponentClient = () => {
-  const cookieStore = cookies()
-  
-  return createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return (cookieStore as any).get(name)?.value
-        },
-      },
-    }
   )
 }
 
@@ -317,5 +298,5 @@ export const createServiceRoleClient = () => {
   )
 }
 
-// Default export for general use
+// Default export for client-side use
 export const supabase = createClientComponentClient()
