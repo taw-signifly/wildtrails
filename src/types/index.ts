@@ -103,6 +103,7 @@ export interface Team {
   seed?: number
   bracketType: BracketType
   stats: TeamStats
+  isBye?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -451,6 +452,14 @@ export interface CourtUtilizationStats {
   peakHours: string[]
   averageMatchesPerCourt: number
 }
+
+// Export Database Error types
+export { 
+  DatabaseError,
+  ValidationError,
+  RecordNotFoundError,
+  FileOperationError
+} from '@/lib/db/base'
 
 // Export all types for easy importing
 export type {
