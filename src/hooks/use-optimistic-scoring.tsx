@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo, useRef } from 'react'
 import { Match, Score, End } from '@/types'
-import { updateMatchScore, submitEndScore } from '@/lib/actions/live-scoring'
+import { updateMatchScore, addEndToMatch } from '@/lib/actions/live-scoring'
 
 interface OptimisticAction {
   id: string
@@ -216,20 +216,18 @@ export function useOptimisticScoring(
     setLastError(null)
 
     try {
-      // Submit to server using FormData for compatibility
-      const formData = new FormData()
-      formData.append('endNumber', endData.endNumber.toString())
-      formData.append('winner', endData.winner)
-      formData.append('points', endData.points.toString())
-      if (endData.jackPosition) {
-        formData.append('jackPositionX', endData.jackPosition.x.toString())
-        formData.append('jackPositionY', endData.jackPosition.y.toString())
-      }
-      if (endData.duration) {
-        formData.append('duration', endData.duration.toString())
+      // Submit to server using programmatic interface
+      const endToAdd: Omit<End, 'id' | 'createdAt'> = {
+        endNumber: endData.endNumber,
+        jackPosition: endData.jackPosition || { x: 7.5, y: 2.5 },
+        boules: [], // Will be populated by the server
+        winner: endData.winner,
+        points: endData.points,
+        duration: endData.duration,
+        completed: true
       }
 
-      const result = await submitEndScore(baseMatch.id, formData)
+      const result = await addEndToMatch(baseMatch.id, endToAdd)
 
       if (result.success) {
         // Remove the optimistic action on success

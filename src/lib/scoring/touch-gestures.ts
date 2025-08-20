@@ -3,6 +3,8 @@
  * Provides optimized touch interactions for mobile and tablet scoring
  */
 
+import * as React from 'react'
+
 // Touch event types
 export type TouchGestureType = 
   | 'tap' 
@@ -117,10 +119,8 @@ export class TouchGestureHandler {
     // Use Haptic API if available (iOS Safari)
     if ('ontouchstart' in window && 'webkitTapHighlightColor' in document.documentElement.style) {
       try {
-        // @ts-expect-error - WebKit specific API not in TypeScript definitions
         if (window.navigator.vibrate) {
           const duration = intensity === 'light' ? 10 : intensity === 'medium' ? 20 : 50
-          // @ts-expect-error - WebKit specific API not in TypeScript definitions
           window.navigator.vibrate(duration)
         }
       } catch {
@@ -407,8 +407,6 @@ export function useTouchGestures(
   }
 }
 
-// Add React import for the hook
-import * as React from 'react'
 
 /**
  * Utility functions for touch optimization
@@ -449,19 +447,21 @@ export const TouchUtils = {
    * Disable text selection for better touch experience
    */
   disableTextSelection(element: HTMLElement): void {
-    element.style.webkitUserSelect = 'none'
-    element.style.userSelect = 'none'
-    element.style.webkitTouchCallout = 'none'
-    element.style.webkitTapHighlightColor = 'transparent'
+    const style = element.style as any
+    style.webkitUserSelect = 'none'
+    style.userSelect = 'none'
+    style.webkitTouchCallout = 'none'
+    style.webkitTapHighlightColor = 'transparent'
   },
 
   /**
    * Enable text selection
    */
   enableTextSelection(element: HTMLElement): void {
-    element.style.webkitUserSelect = 'text'
-    element.style.userSelect = 'text'
-    element.style.webkitTouchCallout = 'default'
-    element.style.webkitTapHighlightColor = ''
+    const style = element.style as any
+    style.webkitUserSelect = 'text'
+    style.userSelect = 'text'
+    style.webkitTouchCallout = 'default'
+    style.webkitTapHighlightColor = ''
   }
 }

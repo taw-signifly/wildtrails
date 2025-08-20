@@ -13,24 +13,11 @@ interface ScoreValidationDisplayProps {
   lastError?: string | null
 }
 
+// Match the actual server action return type
 interface ValidationResult {
   valid: boolean
   errors: string[]
   warnings: string[]
-  suggestions: string[]
-  ruleViolations: Array<{
-    rule: string
-    severity: 'error' | 'warning' | 'info'
-    description: string
-    suggestion?: string
-    affectedField?: string
-  }>
-  scoreIntegrity: {
-    scoreSumMatches: boolean
-    progressionLogical: boolean
-    endCountReasonable: boolean
-    noImpossibleJumps: boolean
-  }
 }
 
 export function ScoreValidationDisplay({ 
@@ -47,13 +34,16 @@ export function ScoreValidationDisplay({
       setIsValidating(true)
       try {
         const result = await validateMatchScore(match.id, match.score)
-        if (result.success) {
-          setValidation(result.data as ValidationResult)
+        if (result.success && result.data) {
+          // result.data is now properly typed as ValidationResult
+          setValidation(result.data)
         } else {
-          console.warn('Validation failed:', result.error)
+          console.warn('Validation failed:', result.success === false ? result.error : 'Unknown error')
+          setValidation(null)
         }
       } catch (error) {
         console.error('Validation error:', error)
+        setValidation(null)
       } finally {
         setIsValidating(false)
       }
@@ -125,7 +115,7 @@ export function ScoreValidationDisplay({
             </div>
 
             {/* Toggle Details Button */}
-            {(validation.errors.length > 0 || validation.warnings.length > 0 || validation.suggestions.length > 0) && (
+            {(validation.errors.length > 0 || validation.warnings.length > 0) && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -176,107 +166,6 @@ export function ScoreValidationDisplay({
                 </div>
               )}
 
-              {/* Suggestions */}
-              {validation.suggestions.length > 0 && (
-                <div className="space-y-2">
-                  <h5 className="text-sm font-medium text-blue-800 flex items-center gap-1">
-                    <span>💡</span>
-                    <span>Suggestions</span>
-                  </h5>
-                  <ul className="space-y-1">
-                    {validation.suggestions.map((suggestion, index) => (
-                      <li key={index} className="text-sm text-blue-700 flex items-start gap-2">
-                        <span className="text-blue-500 text-xs mt-0.5">•</span>
-                        <span>{suggestion}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Rule Violations */}
-              {validation.ruleViolations.length > 0 && (
-                <div className="space-y-2">
-                  <h5 className="text-sm font-medium text-gray-800 flex items-center gap-1">
-                    <span>📋</span>
-                    <span>Rule Violations</span>
-                  </h5>
-                  <ul className="space-y-2">
-                    {validation.ruleViolations.map((violation, index) => (
-                      <li key={index} className="text-sm border border-gray-200 rounded p-2 bg-white">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1">
-                            <div className="font-medium text-gray-900">
-                              {violation.rule}
-                            </div>
-                            <div className="text-gray-700 mt-1">
-                              {violation.description}
-                            </div>
-                            {violation.suggestion && (
-                              <div className="text-blue-600 text-xs mt-1">
-                                💡 {violation.suggestion}
-                              </div>
-                            )}
-                          </div>
-                          <Badge 
-                            variant={
-                              violation.severity === 'error' ? 'destructive' :
-                              violation.severity === 'warning' ? 'secondary' : 'outline'
-                            }
-                            className="text-xs"
-                          >
-                            {violation.severity}
-                          </Badge>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Score Integrity Check */}
-              {validation.scoreIntegrity && (
-                <div className="space-y-2">
-                  <h5 className="text-sm font-medium text-gray-800 flex items-center gap-1">
-                    <span>🔍</span>
-                    <span>Score Integrity</span>
-                  </h5>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className={`text-xs p-2 rounded border flex items-center gap-1 ${
-                      validation.scoreIntegrity.scoreSumMatches 
-                        ? 'bg-green-50 border-green-200 text-green-700' 
-                        : 'bg-red-50 border-red-200 text-red-700'
-                    }`}>
-                      <span>{validation.scoreIntegrity.scoreSumMatches ? '✅' : '❌'}</span>
-                      <span>Score sum matches</span>
-                    </div>
-                    <div className={`text-xs p-2 rounded border flex items-center gap-1 ${
-                      validation.scoreIntegrity.progressionLogical 
-                        ? 'bg-green-50 border-green-200 text-green-700' 
-                        : 'bg-red-50 border-red-200 text-red-700'
-                    }`}>
-                      <span>{validation.scoreIntegrity.progressionLogical ? '✅' : '❌'}</span>
-                      <span>Logical progression</span>
-                    </div>
-                    <div className={`text-xs p-2 rounded border flex items-center gap-1 ${
-                      validation.scoreIntegrity.endCountReasonable 
-                        ? 'bg-green-50 border-green-200 text-green-700' 
-                        : 'bg-red-50 border-red-200 text-red-700'
-                    }`}>
-                      <span>{validation.scoreIntegrity.endCountReasonable ? '✅' : '❌'}</span>
-                      <span>Reasonable end count</span>
-                    </div>
-                    <div className={`text-xs p-2 rounded border flex items-center gap-1 ${
-                      validation.scoreIntegrity.noImpossibleJumps 
-                        ? 'bg-green-50 border-green-200 text-green-700' 
-                        : 'bg-red-50 border-red-200 text-red-700'
-                    }`}>
-                      <span>{validation.scoreIntegrity.noImpossibleJumps ? '✅' : '❌'}</span>
-                      <span>No impossible jumps</span>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </Card>

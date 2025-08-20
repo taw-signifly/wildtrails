@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { ScoringInterface } from '@/components/scoring/scoring-interface'
 import { CourtAssignmentPanel } from '@/components/scoring/court-assignment'
 import { RealTimeUpdates } from '@/components/scoring/real-time-updates'
+import { LiveScoringErrorBoundary } from '@/components/error-boundary'
 
 interface LiveScoringPageProps {
   params: Promise<{
@@ -98,11 +99,13 @@ export default async function LiveScoringPage({ params }: LiveScoringPageProps) 
               </Button>
             </Card>
           ) : (
-            <ScoringInterface 
-              tournamentId={id}
-              matches={availableMatches}
-              initialMatchId={activeMatches[0]?.id || upcomingMatches[0]?.id}
-            />
+            <LiveScoringErrorBoundary>
+              <ScoringInterface 
+                tournamentId={id}
+                matches={availableMatches}
+                initialMatchId={activeMatches[0]?.id || upcomingMatches[0]?.id}
+              />
+            </LiveScoringErrorBoundary>
           )}
         </div>
       </div>

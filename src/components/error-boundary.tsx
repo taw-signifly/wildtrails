@@ -120,3 +120,60 @@ export function TournamentErrorBoundary({ children }: TournamentErrorBoundaryPro
     </ErrorBoundary>
   )
 }
+
+// Specialized error boundary for live scoring
+interface LiveScoringErrorBoundaryProps {
+  children: ReactNode
+}
+
+export function LiveScoringErrorBoundary({ children }: LiveScoringErrorBoundaryProps) {
+  return (
+    <ErrorBoundary
+      onError={(error, errorInfo) => {
+        // Log live scoring specific errors
+        console.error('Live Scoring Error:', {
+          error: error.message,
+          stack: error.stack,
+          componentStack: errorInfo.componentStack,
+          timestamp: new Date().toISOString(),
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+          url: typeof window !== 'undefined' ? window.location.href : 'unknown'
+        })
+      }}
+      fallback={
+        <Card className="p-8 text-center border-red-300 bg-red-50">
+          <div className="space-y-4">
+            <div className="text-red-500 text-4xl">🎯</div>
+            <h2 className="text-lg font-semibold text-red-800">Live Scoring Error</h2>
+            <p className="text-red-700">
+              There was a problem with the live scoring interface. This could be due to:
+            </p>
+            <ul className="text-sm text-red-700 text-left max-w-md mx-auto space-y-1">
+              <li>• Network connectivity issues</li>
+              <li>• Real-time connection problems</li>
+              <li>• Match data synchronization errors</li>
+            </ul>
+            <div className="flex justify-center space-x-2">
+              <Button 
+                onClick={() => window.location.reload()} 
+                variant="outline"
+                className="border-red-300 text-red-700 hover:bg-red-100"
+              >
+                Reload Interface
+              </Button>
+              <Button 
+                onClick={() => window.history.back()} 
+                variant="outline"
+                className="border-red-300 text-red-700 hover:bg-red-100"
+              >
+                Return to Tournament
+              </Button>
+            </div>
+          </div>
+        </Card>
+      }
+    >
+      {children}
+    </ErrorBoundary>
+  )
+}
