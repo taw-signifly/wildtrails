@@ -111,7 +111,7 @@ export function calculateDelta(matches: Match[], teamId: string): number {
 export function calculateTeamStatistics(
   teamId: string, 
   matches: Match[], 
-  options: StatisticsOptions = {}
+  options: Partial<StatisticsOptions> = {}
 ): TeamStatistics {
   const {
     includeIncompleteMatches = false,
@@ -321,7 +321,7 @@ export function calculateTeamStatistics(
 export function calculateTournamentStatistics(
   tournamentId: string,
   matches: Match[],
-  options: StatisticsOptions = {}
+  options: Partial<StatisticsOptions> = {}
 ): TournamentStatistics {
   const tournamentMatches = matches.filter(m => m.tournamentId === tournamentId)
   const completedMatches = tournamentMatches.filter(m => m.status === 'completed' && m.score.isComplete)

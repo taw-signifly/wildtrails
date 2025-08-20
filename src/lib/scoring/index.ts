@@ -14,7 +14,36 @@ export { StatisticsEngine } from './statistics'
 export { AdvancedValidation } from './validation'
 export { PetanqueRules, PETANQUE_RULES, GAME_FORMAT_RULES } from './rules'
 
-// Type exports
+// Import types and functions for internal use
+import type {
+  EndScoreResult,
+  EndMeasurement,
+  RelativePosition,
+  ScoreValidationResult,
+  ScoreIntegrityCheck,
+  RuleViolation,
+  TeamStatistics,
+  PlayerStatistics,
+  TournamentStatistics,
+  EndAnalysis,
+  MatchAnalysis,
+  EndInput,
+  ScoringConfiguration,
+  DistanceCalculationResult,
+  ScoringEngineOptions,
+  ValidationOptions,
+  StatisticsOptions,
+  ScoringEvent,
+  ScoringEngineState
+} from '@/types/scoring'
+
+// Import functions for internal use
+import { calculateEndScore } from './calculator'
+import { validateMatchScore } from './validation'
+import { calculateTeamStatistics } from './statistics'
+import { createScoringEngine } from './engine'
+
+// Re-export types
 export type {
   EndScoreResult,
   EndMeasurement,
@@ -35,7 +64,7 @@ export type {
   StatisticsOptions,
   ScoringEvent,
   ScoringEngineState
-} from '../types/scoring'
+}
 
 // Utility functions for common tasks
 export {

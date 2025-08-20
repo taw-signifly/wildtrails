@@ -22,7 +22,7 @@ import {
  */
 export function validateMatchScore(
   match: Match,
-  options: ValidationOptions = {}
+  options: Partial<ValidationOptions> = {}
 ): ScoreValidationResult {
   const {
     strict = true,
@@ -55,7 +55,7 @@ export function validateMatchScore(
   }
 
   // End-by-end validation
-  const endValidation = validateEndProgression(match.ends, match.score, match.format || 'triples')
+  const endValidation = validateEndProgression(match.ends, match.score, 'triples')
   violations.push(...endValidation.violations)
   errors.push(...endValidation.errors)
   warnings.push(...endValidation.warnings)
