@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { persist } from 'zustand/middleware'
 import { Player } from '@/types'
-import { PlayerSupabaseDB } from '@/lib/db/players-supabase'
-import { createClientComponentClient } from '@/lib/db/supabase'
+import { PlayerSupabaseDB } from '@/lib/db/players-getSupabase()'
+import { createClientComponentClient } from '@/lib/db/getSupabase()'
 
 export interface PlayerFilter {
   search?: string
@@ -81,8 +81,23 @@ export interface PlayerStoreActions {
 
 export type PlayerStore = PlayerStoreState & PlayerStoreActions
 
-const db = new PlayerSupabaseDB()
-const supabase = createClientComponentClient()
+// Lazy initialization for database and client
+let _db: PlayerSupabaseDB | null = null;
+let _getSupabase(): ReturnType<typeof createClientComponentClient> | null = null;
+
+const getDB = () => {
+  if (!_db) {
+    _db = new PlayerSupabaseDB();
+  }
+  return _db;
+}
+
+const getSupabase = () => {
+  if (!_getSupabase()) {
+    _getSupabase() = createClientComponentClient();
+  }
+  return _getSupabase();
+}
 
 export const usePlayerStore = create<PlayerStore>()(
   subscribeWithSelector(
@@ -110,7 +125,7 @@ export const usePlayerStore = create<PlayerStore>()(
           set({ loading: true, error: null })
           
           try {
-            const result = await db.create(playerData)
+            const result = await getDB().create(playerData)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -146,7 +161,7 @@ export const usePlayerStore = create<PlayerStore>()(
           get().optimisticUpdate(id, updates)
           
           try {
-            const result = await db.update(id, updates)
+            const result = await getDB().update(id, updates)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -185,7 +200,7 @@ export const usePlayerStore = create<PlayerStore>()(
           }))
           
           try {
-            const result = await db.delete(id)
+            const result = await getDB().delete(id)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -219,7 +234,7 @@ export const usePlayerStore = create<PlayerStore>()(
           set({ loading: true, error: null })
           
           try {
-            const result = await db.findPaginated(
+            const result = await getDB().findPaginated(
               state.pagination.page,
               state.pagination.limit,
               state.filters
@@ -249,7 +264,7 @@ export const usePlayerStore = create<PlayerStore>()(
 
         loadPlayer: async (id: string) => {
           try {
-            const result = await db.findById(id)
+            const result = await getDB().findById(id)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -280,7 +295,7 @@ export const usePlayerStore = create<PlayerStore>()(
           set({ loading: true, error: null, filters: { ...get().filters, search: query } })
           
           try {
-            const result = await db.search(query)
+            const result = await getDB().search(query)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -301,7 +316,7 @@ export const usePlayerStore = create<PlayerStore>()(
           set({ loading: true, error: null })
           
           try {
-            const result = await db.findByClub(club)
+            const result = await getDB().findByClub(club)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -321,7 +336,7 @@ export const usePlayerStore = create<PlayerStore>()(
 
         findPlayerByEmail: async (email: string) => {
           try {
-            const result = await db.findByEmail(email)
+            const result = await getDB().findByEmail(email)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -377,7 +392,7 @@ export const usePlayerStore = create<PlayerStore>()(
 
         getCurrentPlayerStats: async (id: string) => {
           try {
-            const result = await db.getPlayerStats(id)
+            const result = await getDB().getPlayerStats(id)
             return result.error ? null : result.data
           } catch (error) {
             set({ error: 'Failed to load player statistics' })
@@ -392,7 +407,7 @@ export const usePlayerStore = create<PlayerStore>()(
           
           const channelName = tournamentId ? `players_tournament_${tournamentId}` : 'players_all'
           
-          const subscription = supabase
+          const subscription = getSupabase()
             .channel(channelName)
             .on('postgres_changes', 
               { event: '*', schema: 'public', table: 'players' }, 
@@ -478,7 +493,7 @@ export const usePlayerStore = create<PlayerStore>()(
             
           // Subscribe to team_members changes if tournamentId provided
           if (tournamentId) {
-            const teamSubscription = supabase
+            const teamSubscription = getSupabase()
               .channel(`team_members_${tournamentId}`)
               .on('postgres_changes',
                 { event: '*', schema: 'public', table: 'team_members' },
@@ -504,7 +519,7 @@ export const usePlayerStore = create<PlayerStore>()(
           const state = get()
           
           // Remove all channels
-          supabase.removeAllChannels()
+          getSupabase().removeAllChannels()
           
           // Clear tournament subscriptions
           state.tournamentSubscriptions.clear()

@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { persist } from 'zustand/middleware'
 import { Court, CourtStatus } from '@/types'
-import { CourtSupabaseDB } from '@/lib/db/courts-supabase'
-import { createClientComponentClient } from '@/lib/db/supabase'
+import { CourtSupabaseDB } from '@/lib/db/courts-getSupabase()'
+import { createClientComponentClient } from '@/lib/db/getSupabase()'
 
 export interface CourtFilter {
   tournamentId?: string
@@ -89,8 +89,23 @@ export interface CourtStoreActions {
 
 export type CourtStore = CourtStoreState & CourtStoreActions
 
-const db = new CourtSupabaseDB()
-const supabase = createClientComponentClient()
+// Lazy initialization for database and client
+let _db: CourtSupabaseDB | null = null;
+let _getSupabase(): ReturnType<typeof createClientComponentClient> | null = null;
+
+const getDB = () => {
+  if (!_db) {
+    _db = new CourtSupabaseDB();
+  }
+  return _db;
+}
+
+const getSupabase = () => {
+  if (!_getSupabase()) {
+    _getSupabase() = createClientComponentClient();
+  }
+  return _getSupabase();
+}
 
 export const useCourtStore = create<CourtStore>()(
   subscribeWithSelector(
@@ -114,7 +129,7 @@ export const useCourtStore = create<CourtStore>()(
           set({ loading: true, error: null })
           
           try {
-            const result = await db.create(courtData)
+            const result = await getDB().create(courtData)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -149,7 +164,7 @@ export const useCourtStore = create<CourtStore>()(
           get().optimisticUpdate(id, updates)
           
           try {
-            const result = await db.update(id, updates)
+            const result = await getDB().update(id, updates)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -189,7 +204,7 @@ export const useCourtStore = create<CourtStore>()(
           }))
           
           try {
-            const result = await db.delete(id)
+            const result = await getDB().delete(id)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -240,11 +255,11 @@ export const useCourtStore = create<CourtStore>()(
             const currentFilters = filters || state.filters
 
             if (currentFilters.tournamentId) {
-              result = await db.findByTournament(currentFilters.tournamentId)
+              result = await getDB().findByTournament(currentFilters.tournamentId)
             } else if (currentFilters.status) {
-              result = await db.findByStatus(currentFilters.status)
+              result = await getDB().findByStatus(currentFilters.status)
             } else {
-              result = await db.findAll()
+              result = await getDB().findAll()
             }
             
             if (result.error) {
@@ -268,7 +283,7 @@ export const useCourtStore = create<CourtStore>()(
 
         loadCourt: async (id: string) => {
           try {
-            const result = await db.findById(id)
+            const result = await getDB().findById(id)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -304,7 +319,7 @@ export const useCourtStore = create<CourtStore>()(
 
         loadAvailableCourts: async (tournamentId: string) => {
           try {
-            const result = await db.findAvailable(tournamentId)
+            const result = await getDB().findAvailable(tournamentId)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -321,7 +336,7 @@ export const useCourtStore = create<CourtStore>()(
 
         loadCourtsWithMatches: async (tournamentId: string) => {
           try {
-            const result = await db.findWithCurrentMatches(tournamentId)
+            const result = await getDB().findWithCurrentMatches(tournamentId)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -339,7 +354,7 @@ export const useCourtStore = create<CourtStore>()(
         // Court management
         assignMatchToCourt: async (courtId: string, matchId: string) => {
           try {
-            const result = await db.assignMatch(courtId, matchId)
+            const result = await getDB().assignMatch(courtId, matchId)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -359,7 +374,7 @@ export const useCourtStore = create<CourtStore>()(
 
         releaseCourt: async (courtId: string, matchId: string) => {
           try {
-            const result = await db.releaseFromMatch(courtId, matchId)
+            const result = await getDB().releaseFromMatch(courtId, matchId)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -379,7 +394,7 @@ export const useCourtStore = create<CourtStore>()(
 
         findNextAvailableCourt: async (tournamentId: string) => {
           try {
-            const result = await db.findNextAvailable(tournamentId)
+            const result = await getDB().findNextAvailable(tournamentId)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -397,7 +412,7 @@ export const useCourtStore = create<CourtStore>()(
           set({ loading: true, error: null })
           
           try {
-            const result = await db.createMultiple(tournamentId, courtData)
+            const result = await getDB().createMultiple(tournamentId, courtData)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -445,7 +460,7 @@ export const useCourtStore = create<CourtStore>()(
         // Statistics
         getCourtStats: async (courtId: string) => {
           try {
-            const result = await db.getCourtStats(courtId)
+            const result = await getDB().getCourtStats(courtId)
             return result.error ? null : result.data
           } catch (error) {
             set({ error: 'Failed to load court statistics' })
@@ -455,7 +470,7 @@ export const useCourtStore = create<CourtStore>()(
 
         getTournamentCourtStats: async (tournamentId: string) => {
           try {
-            const result = await db.getTournamentCourtStats(tournamentId)
+            const result = await getDB().getTournamentCourtStats(tournamentId)
             return result.error ? null : result.data
           } catch (error) {
             set({ error: 'Failed to load tournament court statistics' })
@@ -470,7 +485,7 @@ export const useCourtStore = create<CourtStore>()(
           
           const channelName = tournamentId ? `courts_tournament_${tournamentId}` : 'courts_all'
           
-          const subscription = supabase
+          const subscription = getSupabase()
             .channel(channelName)
             .on('postgres_changes', 
               { 
@@ -572,7 +587,7 @@ export const useCourtStore = create<CourtStore>()(
             
           // Subscribe to match changes for court assignments
           if (tournamentId) {
-            const matchSubscription = supabase
+            const matchSubscription = getSupabase()
               .channel(`match_court_assignments_${tournamentId}`)
               .on('postgres_changes',
                 { 
@@ -606,7 +621,7 @@ export const useCourtStore = create<CourtStore>()(
           const state = get()
           
           // Remove all channels
-          supabase.removeAllChannels()
+          getSupabase().removeAllChannels()
           
           // Clear match assignment subscriptions
           state.matchAssignmentSubscriptions.clear()

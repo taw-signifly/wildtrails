@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { persist } from 'zustand/middleware'
 import { Match, MatchStatus } from '@/types'
-import { MatchSupabaseDB } from '@/lib/db/matches-supabase'
-import { createClientComponentClient } from '@/lib/db/supabase'
+import { MatchSupabaseDB } from '@/lib/db/matches-getSupabase()'
+import { createClientComponentClient } from '@/lib/db/getSupabase()'
 
 export interface MatchFilter {
   tournamentId?: string
@@ -90,8 +90,23 @@ export interface MatchStoreActions {
 
 export type MatchStore = MatchStoreState & MatchStoreActions
 
-const db = new MatchSupabaseDB()
-const supabase = createClientComponentClient()
+// Lazy initialization for database and client
+let _db: MatchSupabaseDB | null = null;
+let _getSupabase(): ReturnType<typeof createClientComponentClient> | null = null;
+
+const getDB = () => {
+  if (!_db) {
+    _db = new MatchSupabaseDB();
+  }
+  return _db;
+}
+
+const getSupabase = () => {
+  if (!_getSupabase()) {
+    _getSupabase() = createClientComponentClient();
+  }
+  return _getSupabase();
+}
 
 export const useMatchStore = create<MatchStore>()(
   subscribeWithSelector(
@@ -115,7 +130,7 @@ export const useMatchStore = create<MatchStore>()(
           set({ loading: true, error: null })
           
           try {
-            const result = await db.create(matchData)
+            const result = await getDB().create(matchData)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -147,7 +162,7 @@ export const useMatchStore = create<MatchStore>()(
           get().optimisticUpdate(id, updates)
           
           try {
-            const result = await db.update(id, updates)
+            const result = await getDB().update(id, updates)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -186,7 +201,7 @@ export const useMatchStore = create<MatchStore>()(
           }))
           
           try {
-            const result = await db.delete(id)
+            const result = await getDB().delete(id)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -241,15 +256,15 @@ export const useMatchStore = create<MatchStore>()(
             const currentFilters = filters || state.filters
 
             if (currentFilters.tournamentId) {
-              result = await db.findByTournament(currentFilters.tournamentId)
+              result = await getDB().findByTournament(currentFilters.tournamentId)
             } else if (currentFilters.status) {
-              result = await db.findByStatus(currentFilters.status)
+              result = await getDB().findByStatus(currentFilters.status)
             } else if (currentFilters.teamId) {
-              result = await db.findByTeam(currentFilters.teamId)
+              result = await getDB().findByTeam(currentFilters.teamId)
             } else if (currentFilters.courtId) {
-              result = await db.findByCourt(currentFilters.courtId)
+              result = await getDB().findByCourt(currentFilters.courtId)
             } else {
-              result = await db.findAll()
+              result = await getDB().findAll()
             }
             
             if (result.error) {
@@ -269,7 +284,7 @@ export const useMatchStore = create<MatchStore>()(
 
         loadMatch: async (id: string) => {
           try {
-            const result = await db.findById(id)
+            const result = await getDB().findById(id)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -304,7 +319,7 @@ export const useMatchStore = create<MatchStore>()(
           set({ loading: true, error: null })
           
           try {
-            const result = await db.findByRound(tournamentId, round)
+            const result = await getDB().findByRound(tournamentId, round)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -327,7 +342,7 @@ export const useMatchStore = create<MatchStore>()(
 
         loadActiveMatches: async () => {
           try {
-            const result = await db.findActive()
+            const result = await getDB().findActive()
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -360,7 +375,7 @@ export const useMatchStore = create<MatchStore>()(
           set({ loading: true, error: null })
           
           try {
-            const result = await db.createRoundMatches(tournamentId, round, matchesData)
+            const result = await getDB().createRoundMatches(tournamentId, round, matchesData)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -406,7 +421,7 @@ export const useMatchStore = create<MatchStore>()(
         // Statistics
         getMatchStats: async (tournamentId: string) => {
           try {
-            const result = await db.getTournamentMatchStats(tournamentId)
+            const result = await getDB().getTournamentMatchStats(tournamentId)
             return result.error ? null : result.data
           } catch (error) {
             set({ error: 'Failed to load match statistics' })
@@ -421,7 +436,7 @@ export const useMatchStore = create<MatchStore>()(
           
           const channelName = tournamentId ? `matches_${tournamentId}` : 'matches_all'
           
-          const subscription = supabase
+          const subscription = getSupabase()
             .channel(channelName)
             .on('postgres_changes', 
               { 
@@ -530,7 +545,7 @@ export const useMatchStore = create<MatchStore>()(
           const state = get()
           
           // Remove all channels
-          supabase.removeAllChannels()
+          getSupabase().removeAllChannels()
           
           // Clear live scoring subscriptions
           state.activeLiveScoreSubscriptions.clear()
@@ -563,7 +578,7 @@ export const useMatchStore = create<MatchStore>()(
           const state = get()
           if (state.activeLiveScoreSubscriptions.has(matchId)) return
           
-          const liveChannel = supabase
+          const liveChannel = getSupabase()
             .channel(`live_scoring_${matchId}`)
             .on('broadcast', 
               { event: 'live_score' }, 
@@ -600,7 +615,7 @@ export const useMatchStore = create<MatchStore>()(
         },
         
         unsubscribeLiveScoring: (matchId: string) => {
-          supabase.removeChannel(`live_scoring_${matchId}`)
+          getSupabase().removeChannel(`live_scoring_${matchId}`)
           
           set(state => {
             const newSubscriptions = new Set(state.activeLiveScoreSubscriptions)

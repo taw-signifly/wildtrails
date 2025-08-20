@@ -50,13 +50,23 @@ export abstract class SupabaseDB<T extends BaseEntity> {
 	protected readonly entityName: string;
 	protected readonly tableName: string;
 	protected readonly enableRealtime: boolean;
-	protected readonly supabase: ReturnType<typeof createServiceRoleClient>;
+	private _supabase: ReturnType<typeof createServiceRoleClient> | null = null;
 
 	constructor(entityName: string, config: SupabaseConfig, protected readonly schema: z.ZodSchema<T>) {
 		this.entityName = entityName;
 		this.tableName = config.tableName;
 		this.enableRealtime = config.enableRealtime ?? false;
-		this.supabase = createServiceRoleClient();
+		// Don't create the client in constructor - use lazy initialization
+	}
+
+	/**
+	 * Get Supabase client with lazy initialization
+	 */
+	protected get supabase(): ReturnType<typeof createServiceRoleClient> {
+		if (!this._supabase) {
+			this._supabase = createServiceRoleClient();
+		}
+		return this._supabase;
 	}
 
 	/**
