@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { persist } from 'zustand/middleware'
 import { Tournament, TournamentStatus, TournamentFormData, TournamentStats } from '@/types'
-import { TournamentSupabaseDB } from '@/lib/db/tournaments-supabase'
-import { createClientComponentClient } from '@/lib/db/supabase'
+import { TournamentSupabaseDB } from '@/lib/db/tournaments-getSupabase()'
+import { createClientComponentClient } from '@/lib/db/getSupabase()'
 
 export interface TournamentFilter {
   status?: TournamentStatus[]
@@ -78,8 +78,23 @@ export interface TournamentStoreActions {
 
 export type TournamentStore = TournamentStoreState & TournamentStoreActions
 
-const db = new TournamentSupabaseDB()
-const supabase = createClientComponentClient()
+// Lazy initialization for database and client
+let _db: TournamentSupabaseDB | null = null;
+let _getSupabase(): ReturnType<typeof createClientComponentClient> | null = null;
+
+const getDB = () => {
+  if (!_db) {
+    _db = new TournamentSupabaseDB();
+  }
+  return _db;
+}
+
+const getSupabase = () => {
+  if (!_getSupabase()) {
+    _getSupabase() = createClientComponentClient();
+  }
+  return _getSupabase();
+}
 
 export const useTournamentStore = create<TournamentStore>()(
   subscribeWithSelector(
@@ -105,7 +120,7 @@ export const useTournamentStore = create<TournamentStore>()(
           set({ loading: true, error: null })
           
           try {
-            const result = await db.create(formData)
+            const result = await getDB().create(formData)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -142,7 +157,7 @@ export const useTournamentStore = create<TournamentStore>()(
           get().optimisticUpdate(id, updates)
           
           try {
-            const result = await db.update(id, updates)
+            const result = await getDB().update(id, updates)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -181,7 +196,7 @@ export const useTournamentStore = create<TournamentStore>()(
           }))
           
           try {
-            const result = await db.delete(id)
+            const result = await getDB().delete(id)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -207,7 +222,7 @@ export const useTournamentStore = create<TournamentStore>()(
           set({ loading: true, error: null })
           
           try {
-            const result = await db.findPaginated(
+            const result = await getDB().findPaginated(
               state.pagination.page,
               state.pagination.limit,
               state.filters
@@ -237,7 +252,7 @@ export const useTournamentStore = create<TournamentStore>()(
 
         loadTournament: async (id: string) => {
           try {
-            const result = await db.findById(id)
+            const result = await getDB().findById(id)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -268,7 +283,7 @@ export const useTournamentStore = create<TournamentStore>()(
           set({ loading: true, error: null, filters: { ...get().filters, search: query } })
           
           try {
-            const result = await db.search(query)
+            const result = await getDB().search(query)
             if (result.error) {
               throw new Error(result.error.message)
             }
@@ -340,7 +355,7 @@ export const useTournamentStore = create<TournamentStore>()(
           if (!currentTournament) return null
           
           try {
-            const result = await db.getStats(currentTournament.id)
+            const result = await getDB().getStats(currentTournament.id)
             return result.error ? null : result.data
           } catch (error) {
             set({ error: 'Failed to load tournament statistics' })
@@ -350,7 +365,7 @@ export const useTournamentStore = create<TournamentStore>()(
 
         // Real-time updates
         startRealTimeUpdates: () => {
-          const subscription = supabase
+          const subscription = getSupabase()
             .channel('tournaments_changes')
             .on('postgres_changes', 
               { event: '*', schema: 'public', table: 'tournaments' }, 
@@ -394,7 +409,7 @@ export const useTournamentStore = create<TournamentStore>()(
         },
 
         stopRealTimeUpdates: () => {
-          supabase.removeAllChannels()
+          getSupabase().removeAllChannels()
           set({ isConnected: false })
         },
 

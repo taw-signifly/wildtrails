@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Match } from '@/types'
-import { getMatchById } from '@/lib/actions/matches'
+import { createClientComponentClient } from '@/lib/db/supabase'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 interface LiveScoringState {
   currentMatch: Match | null
@@ -10,12 +11,16 @@ interface LiveScoringState {
   connectionError: string | null
   isLoading: boolean
   lastUpdate: number | null
+  activeBroadcasts: Set<string>
 }
 
 interface UseLiveScoringReturn extends LiveScoringState {
   subscribeToMatch: (matchId: string) => void
   unsubscribeFromMatch: (matchId: string) => void
   refreshMatch: () => Promise<void>
+  broadcastScoreUpdate: (matchId: string, score: any) => void
+  broadcastEndScored: (matchId: string, endData: any) => void
+  broadcastMatchEvent: (matchId: string, eventType: string, data: any) => void
 }
 
 export function useLiveScoring(tournamentId: string): UseLiveScoringReturn {
@@ -24,53 +29,129 @@ export function useLiveScoring(tournamentId: string): UseLiveScoringReturn {
     isConnected: false,
     connectionError: null,
     isLoading: false,
-    lastUpdate: null
+    lastUpdate: null,
+    activeBroadcasts: new Set()
   })
 
   const activeMatchId = useRef<string | null>(null)
-  const eventSourceRef = useRef<EventSource | null>(null)
+  const channelRef = useRef<RealtimeChannel | null>(null)
+  const supabase = createClientComponentClient()
 
-  // Initialize SSE connection for tournament
+  // Initialize Supabase real-time connection for tournament
   const connectToTournament = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close()
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current)
     }
 
     setState(prev => ({ ...prev, connectionError: null }))
 
     try {
-      const eventSource = new EventSource(`/api/live/tournament/${tournamentId}`)
-      eventSourceRef.current = eventSource
-
-      eventSource.onopen = () => {
-        setState(prev => ({ ...prev, isConnected: true, connectionError: null }))
-      }
-
-      eventSource.onmessage = (event) => {
-        try {
-          const eventData = JSON.parse(event.data)
-          handleLiveEvent(eventData)
-          setState(prev => ({ ...prev, lastUpdate: Date.now() }))
-        } catch (error) {
-          console.error('Error parsing live event:', error)
-        }
-      }
-
-      eventSource.onerror = () => {
-        setState(prev => ({ 
-          ...prev, 
-          isConnected: false, 
-          connectionError: 'Connection lost' 
-        }))
-        eventSource.close()
-        
-        // Attempt to reconnect after 3 seconds
-        setTimeout(() => {
-          if (activeMatchId.current) {
-            connectToTournament()
+      const channel = supabase
+        .channel(`live_scoring_${tournamentId}`)
+        .on('postgres_changes',
+          { 
+            event: '*', 
+            schema: 'public', 
+            table: 'matches',
+            filter: `tournament_id=eq.${tournamentId}`
+          },
+          (payload) => {
+            const { eventType, new: newRecord } = payload
+            if (eventType === 'UPDATE' && newRecord && activeMatchId.current === newRecord.id) {
+              setState(prev => ({
+                ...prev,
+                currentMatch: newRecord as Match,
+                lastUpdate: Date.now()
+              }))
+            }
           }
-        }, 3000)
-      }
+        )
+        .on('postgres_changes',
+          {
+            event: '*',
+            schema: 'public', 
+            table: 'match_games',
+            filter: `match_id=eq.${activeMatchId.current || ''}`
+          },
+          (payload) => {
+            // Handle end-by-end scoring updates
+            refreshMatch()
+            setState(prev => ({ ...prev, lastUpdate: Date.now() }))
+          }
+        )
+        .on('broadcast',
+          { event: 'live_score' },
+          (payload) => {
+            const { matchId, score, timestamp } = payload.payload
+            if (activeMatchId.current === matchId) {
+              setState(prev => ({
+                ...prev,
+                currentMatch: prev.currentMatch ? { ...prev.currentMatch, score } : null,
+                lastUpdate: Date.now()
+              }))
+            }
+          }
+        )
+        .on('broadcast',
+          { event: 'end_scored' },
+          (payload) => {
+            const { matchId } = payload.payload
+            if (activeMatchId.current === matchId) {
+              refreshMatch()
+              setState(prev => ({ ...prev, lastUpdate: Date.now() }))
+            }
+          }
+        )
+        .on('broadcast',
+          { event: 'match_event' },
+          (payload) => {
+            const { matchId, eventType, data } = payload.payload
+            if (activeMatchId.current === matchId) {
+              handleLiveEvent({ type: eventType, matchId, data })
+              setState(prev => ({ ...prev, lastUpdate: Date.now() }))
+            }
+          }
+        )
+        .subscribe((status, error) => {
+          if (error) {
+            setState(prev => ({
+              ...prev,
+              isConnected: false,
+              connectionError: `Connection error: ${error.message}`
+            }))
+          } else {
+            switch (status) {
+              case 'SUBSCRIBED':
+                setState(prev => ({ ...prev, isConnected: true, connectionError: null }))
+                break
+              case 'CHANNEL_ERROR':
+                setState(prev => ({
+                  ...prev,
+                  isConnected: false,
+                  connectionError: 'Channel error'
+                }))
+                break
+              case 'TIMED_OUT':
+                setState(prev => ({
+                  ...prev,
+                  isConnected: false,
+                  connectionError: 'Connection timed out'
+                }))
+                // Attempt to reconnect
+                setTimeout(() => {
+                  if (activeMatchId.current) {
+                    connectToTournament()
+                  }
+                }, 3000)
+                break
+              case 'CLOSED':
+                setState(prev => ({ ...prev, isConnected: false }))
+                break
+            }
+          }
+        })
+
+      channelRef.current = channel
     } catch (error) {
       setState(prev => ({ 
         ...prev, 
@@ -78,9 +159,9 @@ export function useLiveScoring(tournamentId: string): UseLiveScoringReturn {
         connectionError: 'Failed to connect' 
       }))
     }
-  }, [tournamentId])
+  }, [tournamentId, supabase])
 
-  // Handle live events from SSE
+  // Handle live events from Supabase real-time
   const handleLiveEvent = useCallback((eventData: any) => {
     if (!activeMatchId.current) return
 
@@ -93,6 +174,17 @@ export function useLiveScoring(tournamentId: string): UseLiveScoringReturn {
         case 'match_start':
           // Refresh match data when relevant events occur
           refreshMatch()
+          break
+        case 'match_paused':
+        case 'match_resumed':
+          // Handle pause/resume without full refresh
+          setState(prev => ({
+            ...prev,
+            currentMatch: prev.currentMatch ? {
+              ...prev.currentMatch,
+              status: eventData.type === 'match_paused' ? 'paused' : 'in_progress'
+            } : null
+          }))
           break
         default:
           break
@@ -107,21 +199,25 @@ export function useLiveScoring(tournamentId: string): UseLiveScoringReturn {
     setState(prev => ({ ...prev, isLoading: true }))
     
     try {
-      const result = await getMatchById(activeMatchId.current)
-      if (result.success) {
-        setState(prev => ({ 
-          ...prev, 
-          currentMatch: result.data,
-          isLoading: false 
-        }))
-      } else {
-        console.error('Failed to refresh match:', result.error)
-        setState(prev => ({ 
-          ...prev, 
-          connectionError: 'Failed to refresh match data',
-          isLoading: false 
-        }))
-      }
+      const { data, error } = await supabase
+        .from('matches')
+        .select(`
+          *,
+          team1:teams!team1_id(id, name),
+          team2:teams!team2_id(id, name),
+          court:courts!court_id(id, name, status),
+          games:match_games(*)
+        `)
+        .eq('id', activeMatchId.current)
+        .single()
+
+      if (error) throw error
+
+      setState(prev => ({ 
+        ...prev, 
+        currentMatch: data as Match,
+        isLoading: false 
+      }))
     } catch (error) {
       console.error('Error refreshing match:', error)
       setState(prev => ({ 
@@ -130,14 +226,14 @@ export function useLiveScoring(tournamentId: string): UseLiveScoringReturn {
         isLoading: false 
       }))
     }
-  }, [])
+  }, [supabase])
 
   // Subscribe to a specific match
   const subscribeToMatch = useCallback(async (matchId: string) => {
     activeMatchId.current = matchId
     
-    // Connect to tournament SSE if not already connected
-    if (!state.isConnected && !eventSourceRef.current) {
+    // Connect to tournament real-time if not already connected
+    if (!state.isConnected && !channelRef.current) {
       connectToTournament()
     }
 
@@ -149,9 +245,20 @@ export function useLiveScoring(tournamentId: string): UseLiveScoringReturn {
   const unsubscribeFromMatch = useCallback((matchId: string) => {
     if (activeMatchId.current === matchId) {
       activeMatchId.current = null
-      setState(prev => ({ ...prev, currentMatch: null }))
+      setState(prev => ({ 
+        ...prev, 
+        currentMatch: null,
+        activeBroadcasts: new Set()
+      }))
+      
+      // Remove channel if no active match
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+        setState(prev => ({ ...prev, isConnected: false }))
+      }
     }
-  }, [])
+  }, [supabase])
 
   // Set up real-time event listeners for custom events
   useEffect(() => {
@@ -194,20 +301,84 @@ export function useLiveScoring(tournamentId: string): UseLiveScoringReturn {
     }
   }, [refreshMatch])
 
+  // Broadcast score update
+  const broadcastScoreUpdate = useCallback((matchId: string, score: any) => {
+    if (!channelRef.current) return
+    
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'live_score',
+      payload: {
+        matchId,
+        score,
+        timestamp: new Date().toISOString()
+      }
+    })
+    
+    setState(prev => ({
+      ...prev,
+      activeBroadcasts: new Set([...prev.activeBroadcasts, 'score_update'])
+    }))
+  }, [])
+  
+  // Broadcast end scored
+  const broadcastEndScored = useCallback((matchId: string, endData: any) => {
+    if (!channelRef.current) return
+    
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'end_scored',
+      payload: {
+        matchId,
+        endData,
+        timestamp: new Date().toISOString()
+      }
+    })
+    
+    setState(prev => ({
+      ...prev,
+      activeBroadcasts: new Set([...prev.activeBroadcasts, 'end_scored'])
+    }))
+  }, [])
+  
+  // Broadcast match event
+  const broadcastMatchEvent = useCallback((matchId: string, eventType: string, data: any) => {
+    if (!channelRef.current) return
+    
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'match_event',
+      payload: {
+        matchId,
+        eventType,
+        data,
+        timestamp: new Date().toISOString()
+      }
+    })
+    
+    setState(prev => ({
+      ...prev,
+      activeBroadcasts: new Set([...prev.activeBroadcasts, eventType])
+    }))
+  }, [])
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close()
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
       }
       activeMatchId.current = null
     }
-  }, [])
+  }, [supabase])
 
   return {
     ...state,
     subscribeToMatch,
     unsubscribeFromMatch,
-    refreshMatch
+    refreshMatch,
+    broadcastScoreUpdate,
+    broadcastEndScored,
+    broadcastMatchEvent
   }
 }

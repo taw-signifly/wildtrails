@@ -22,9 +22,23 @@ interface Match {
   updated_at: string
 }
 
-// Supabase database instances
-const courtDB = new CourtSupabaseDB()
-const matchDB = new MatchSupabaseDB()
+// Lazy initialization of database instances
+let _courtDB: CourtSupabaseDB | null = null;
+let _matchDB: MatchSupabaseDB | null = null;
+
+const getCourtDB = () => {
+  if (!_courtDB) {
+    _courtDB = new CourtSupabaseDB();
+  }
+  return _courtDB;
+}
+
+const getMatchDB = () => {
+  if (!_matchDB) {
+    _matchDB = new MatchSupabaseDB();
+  }
+  return _matchDB;
+}
 
 // Court surface type
 export type CourtSurface = 'gravel' | 'sand' | 'dirt' | 'artificial'
@@ -121,12 +135,12 @@ export async function getCourts(filters?: {
     let courtsResult
     
     if (filters?.available && filters?.tournamentId) {
-      courtsResult = await courtDB.findAvailable(filters.tournamentId)
+      courtsResult = await getCourtDB().findAvailable(filters.tournamentId)
     } else if (filters?.status) {
-      courtsResult = await courtDB.findByStatus(filters.status)
+      courtsResult = await getCourtDB().findByStatus(filters.status)
     } else {
       // Use basic findAll for other cases
-      courtsResult = await courtDB.findAll()
+      courtsResult = await getCourtDB().findAll()
     }
     
     if (courtsResult.error) {
@@ -173,7 +187,7 @@ export async function getCourtById(id: string): Promise<ActionResult<Court>> {
       }
     }
     
-    const result = await courtDB.findById(id)
+    const result = await getCourtDB().findById(id)
     
     if (result.error) {
       return {
@@ -230,7 +244,7 @@ export async function createCourt(formData: FormData): Promise<ActionResult<Cour
       status: 'available' as CourtStatus,
       amenities: courtData.amenities || []
     }
-    const result = await courtDB.create(fullCourtData)
+    const result = await getCourtDB().create(fullCourtData)
     
     // Convert database result to action result
     const actionResult = resultToActionResult(result, 'Court created successfully')
@@ -264,7 +278,7 @@ export async function updateCourtData(id: string, data: Partial<Court>): Promise
     }
     
     // Update court in database
-    const result = await courtDB.update(id, data)
+    const result = await getCourtDB().update(id, data)
     
     // Convert database result to action result
     const actionResult = resultToActionResult(result, 'Court updated successfully')
@@ -307,7 +321,7 @@ export async function updateCourtStatus(courtId: string, status: CourtStatus): P
     }
     
     // Update court status in database
-    const result = await courtDB.updateStatus(courtId, status)
+    const result = await getCourtDB().updateStatus(courtId, status)
     
     // Convert database result to action result
     const actionResult = resultToActionResult(result, `Court status updated to ${status}`)
@@ -348,7 +362,7 @@ export async function assignMatchToCourt(matchId: string, courtId: string): Prom
     }
     
     // Check if court is available
-    const courtResult = await courtDB.findById(courtId)
+    const courtResult = await getCourtDB().findById(courtId)
     if (courtResult.error || !courtResult.data) {
       return {
         success: false,
@@ -365,7 +379,7 @@ export async function assignMatchToCourt(matchId: string, courtId: string): Prom
     }
     
     // Check if match exists and can be assigned
-    const matchResult = await matchDB.findById(matchId)
+    const matchResult = await getMatchDB().findById(matchId)
     if (matchResult.error || !matchResult.data) {
       return {
         success: false,
@@ -382,7 +396,7 @@ export async function assignMatchToCourt(matchId: string, courtId: string): Prom
     }
     
     // Assign court to match
-    const courtAssignResult = await courtDB.assignMatch(courtId, matchId)
+    const courtAssignResult = await getCourtDB().assignMatch(courtId, matchId)
     if (courtAssignResult.error) {
       return {
         success: false,
@@ -391,7 +405,7 @@ export async function assignMatchToCourt(matchId: string, courtId: string): Prom
     }
     
     // Update match with court assignment
-    const matchUpdateResult = await matchDB.assignToCourt(matchId, courtId)
+    const matchUpdateResult = await getMatchDB().assignToCourt(matchId, courtId)
     if (matchUpdateResult.error) {
       return {
         success: false,
@@ -438,7 +452,7 @@ export async function releaseCourtAssignment(matchId: string): Promise<ActionRes
     }
     
     // Get match to find court
-    const matchResult = await matchDB.findById(matchId)
+    const matchResult = await getMatchDB().findById(matchId)
     if (matchResult.error || !matchResult.data) {
       return {
         success: false,
@@ -455,7 +469,7 @@ export async function releaseCourtAssignment(matchId: string): Promise<ActionRes
     }
     
     // Release court from match
-    const courtReleaseResult = await courtDB.releaseFromMatch(match.courtId, matchId)
+    const courtReleaseResult = await getCourtDB().releaseFromMatch(match.courtId, matchId)
     if (courtReleaseResult.error) {
       return {
         success: false,
@@ -464,7 +478,7 @@ export async function releaseCourtAssignment(matchId: string): Promise<ActionRes
     }
     
     // Update match to remove court assignment
-    const matchUpdateResult = await matchDB.update(matchId, { courtId: undefined })
+    const matchUpdateResult = await getMatchDB().update(matchId, { courtId: undefined })
     if (matchUpdateResult.error) {
       return {
         success: false,
@@ -516,7 +530,7 @@ export async function findAvailableCourt(
     }
     
     // Find suitable courts based on requirements
-    const allCourtsResult = await courtDB.findAll()
+    const allCourtsResult = await getCourtDB().findAll()
     if (allCourtsResult.error) {
       throw allCourtsResult.error
     }
@@ -591,7 +605,7 @@ export async function getCourtAvailability(
     }
     
     // Get court data
-    const courtResult = await courtDB.findById(courtId)
+    const courtResult = await getCourtDB().findById(courtId)
     if (courtResult.error || !courtResult.data) {
       return {
         success: false,
@@ -609,7 +623,7 @@ export async function getCourtAvailability(
     
     // Get upcoming matches for this court
     let upcomingMatches: Match[] = []
-    const matchesResult = await matchDB.findByCourt(courtId)
+    const matchesResult = await getMatchDB().findByCourt(courtId)
     if (matchesResult.data) {
       upcomingMatches = (matchesResult.data as any[]).filter(match => 
         match.status === 'scheduled' && 
@@ -670,7 +684,7 @@ export async function getCourtSchedule(
     }
     
     // Get court data
-    const courtResult = await courtDB.findById(courtId)
+    const courtResult = await getCourtDB().findById(courtId)
     if (courtResult.error || !courtResult.data) {
       return {
         success: false,
@@ -681,7 +695,7 @@ export async function getCourtSchedule(
     const court = courtResult.data
     
     // Get matches for this court
-    const matchesResult = await matchDB.findByCourt(courtId)
+    const matchesResult = await getMatchDB().findByCourt(courtId)
     if (matchesResult.data && dateRange) {
       // Client-side date filtering
       const startDate = new Date(dateRange.start)
@@ -770,7 +784,7 @@ export async function reserveCourtForMatch(courtId: string, matchId: string): Pr
     }
     
     // Reserve court for match by updating its status
-    const courtReserveResult = await courtDB.updateStatus(courtId, 'reserved')
+    const courtReserveResult = await getCourtDB().updateStatus(courtId, 'reserved')
     if (courtReserveResult.error) {
       return {
         success: false,
@@ -779,7 +793,7 @@ export async function reserveCourtForMatch(courtId: string, matchId: string): Pr
     }
     
     // Get match data
-    const matchResult = await matchDB.findById(matchId)
+    const matchResult = await getMatchDB().findById(matchId)
     if (matchResult.error || !matchResult.data) {
       return {
         success: false,
@@ -823,7 +837,7 @@ export async function setCourtMaintenance(courtId: string, reason?: string): Pro
     }
     
     // Set court to maintenance mode by updating status
-    const result = await courtDB.updateStatus(courtId, 'maintenance')
+    const result = await getCourtDB().updateStatus(courtId, 'maintenance')
     
     // Convert database result to action result
     const actionResult = resultToActionResult(result, 'Court set to maintenance mode')
@@ -858,7 +872,7 @@ export async function removeCourtMaintenance(courtId: string): Promise<ActionRes
     }
     
     // Remove court from maintenance mode by updating status
-    const result = await courtDB.updateStatus(courtId, 'available')
+    const result = await getCourtDB().updateStatus(courtId, 'available')
     
     // Convert database result to action result
     const actionResult = resultToActionResult(result, 'Court removed from maintenance mode')
@@ -895,7 +909,7 @@ export async function getCourtUtilization(): Promise<ActionResult<{
 }>> {
   try {
     // Get all courts to calculate basic utilization stats
-    const courtsResult = await courtDB.findAll()
+    const courtsResult = await getCourtDB().findAll()
     
     if (courtsResult.error) {
       return {
@@ -947,7 +961,7 @@ export async function searchCourts(query: string): Promise<ActionResult<Court[]>
     }
     
     // Search courts using findAll and client-side filtering
-    const allCourtsResult = await courtDB.findAll()
+    const allCourtsResult = await getCourtDB().findAll()
     if (allCourtsResult.error) {
       return {
         success: false,
