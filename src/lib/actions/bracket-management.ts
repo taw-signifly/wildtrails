@@ -7,6 +7,8 @@ import { resultToActionResult } from '@/lib/api/action-utils'
 import { broadcastBracketUpdate, broadcastTournamentUpdate } from '@/lib/api/sse'
 import { Match, Tournament, BracketType, TournamentType, Team } from '@/types'
 import { ActionResult } from '@/types/actions'
+import { BracketGenerator } from '@/lib/tournament'
+import type { BracketGenerationOptions, SeedingOptions } from '@/lib/tournament/types'
 
 /**
  * Bracket node interface for tournament structure
@@ -80,7 +82,8 @@ export async function generateBracketMatchesForm(formData: FormData): Promise<Ac
 export async function generateBracketMatches(
   tournamentId: string,
   bracketType: TournamentType,
-  teams: Team[]
+  teams: Team[],
+  options?: Partial<BracketGenerationOptions>
 ): Promise<ActionResult<{
   matches: Match[]
   bracketStructure: BracketNode[]
@@ -104,52 +107,20 @@ export async function generateBracketMatches(
     
     const tournament = tournamentResult.data
     
-    // Validate team count for bracket type
-    if (teams.length < 2) {
-      return {
-        success: false,
-        error: 'At least 2 teams are required to generate brackets'
-      }
+    // Ensure tournament type matches bracket type
+    if (tournament.type !== bracketType) {
+      await tournamentDB.update(tournamentId, { type: bracketType })
+      tournament.type = bracketType
     }
     
-    // Generate matches based on bracket type
-    let matches: Omit<Match, 'id' | 'createdAt' | 'updatedAt'>[] = []
-    let bracketStructure: BracketNode[] = []
+    // Initialize bracket generator
+    const bracketGenerator = new BracketGenerator()
     
-    switch (bracketType) {
-      case 'single-elimination':
-        const singleElimResult = generateSingleEliminationMatches(tournamentId, teams, tournament)
-        matches = singleElimResult.matches
-        bracketStructure = singleElimResult.bracketStructure
-        break
-        
-      case 'double-elimination':
-        const doubleElimResult = generateDoubleEliminationMatches(tournamentId, teams, tournament)
-        matches = doubleElimResult.matches
-        bracketStructure = doubleElimResult.bracketStructure
-        break
-        
-      case 'round-robin':
-        const roundRobinResult = generateRoundRobinMatches(tournamentId, teams, tournament)
-        matches = roundRobinResult.matches
-        bracketStructure = roundRobinResult.bracketStructure
-        break
-        
-      case 'swiss':
-        const swissResult = generateSwissSystemMatches(tournamentId, teams, tournament, 1)
-        matches = swissResult.matches
-        bracketStructure = swissResult.bracketStructure
-        break
-        
-      default:
-        return {
-          success: false,
-          error: `Unsupported bracket type: ${bracketType}`
-        }
-    }
+    // Generate bracket using new tournament logic
+    const bracketResult = await bracketGenerator.generateBracket(tournament, teams, options)
     
     // Bulk create matches
-    const createResult = await matchDB.bulkCreate(matches)
+    const createResult = await matchDB.bulkCreate(bracketResult.matches)
     if (createResult.error) {
       return {
         success: false,
@@ -157,7 +128,7 @@ export async function generateBracketMatches(
       }
     }
     
-    // Update tournament with bracket structure
+    // Update tournament status
     await tournamentDB.update(tournamentId, {
       status: 'active'
     })
@@ -167,22 +138,27 @@ export async function generateBracketMatches(
     revalidatePath(`/tournaments/${tournamentId}/bracket`)
     
     // Broadcast bracket generation via SSE
-    broadcastBracketUpdate(tournamentId, '', bracketStructure, createResult.data.successful.map(m => m.id || ''))
+    broadcastBracketUpdate(
+      tournamentId, 
+      '', 
+      bracketResult.bracketStructure, 
+      createResult.data.successful.map(m => m.id || '')
+    )
     
     return {
       success: true,
       data: {
         matches: createResult.data.successful,
-        bracketStructure
+        bracketStructure: bracketResult.bracketStructure
       },
-      message: `${createResult.data.successful.length} matches created successfully`
+      message: `${createResult.data.successful.length} matches created successfully for ${bracketResult.metadata.format}`
     }
     
   } catch (error) {
     console.error('Error generating bracket matches:', error)
     return {
       success: false,
-      error: 'An unexpected error occurred while generating bracket matches'
+      error: error instanceof Error ? error.message : 'An unexpected error occurred while generating bracket matches'
     }
   }
 }
@@ -230,42 +206,40 @@ export async function updateBracketProgression(
     
     const tournament = tournamentResult.data
     
-    // Handle progression based on tournament type
-    let affectedMatches: Match[] = [match]
-    let bracketStructure: BracketNode[] = []
-    let nextRoundMatches: Match[] = []
+    // Get all tournament matches for context
+    const allMatchesResult = await matchDB.findByTournament(tournamentId)
+    if (allMatchesResult.error || !allMatchesResult.data) {
+      return {
+        success: false,
+        error: 'Failed to retrieve tournament matches'
+      }
+    }
     
-    switch (tournament.type) {
-      case 'single-elimination':
-        const singleElimUpdate = await updateSingleEliminationProgression(match, tournament)
-        affectedMatches = singleElimUpdate.affectedMatches
-        bracketStructure = singleElimUpdate.bracketStructure
-        nextRoundMatches = singleElimUpdate.nextRoundMatches
-        break
-        
-      case 'double-elimination':
-        const doubleElimUpdate = await updateDoubleEliminationProgression(match, tournament)
-        affectedMatches = doubleElimUpdate.affectedMatches
-        bracketStructure = doubleElimUpdate.bracketStructure
-        nextRoundMatches = doubleElimUpdate.nextRoundMatches
-        break
-        
-      case 'round-robin':
-        // Round-robin doesn't need progression updates
-        const currentBracket = await getCurrentBracketStructure(tournamentId)
-        bracketStructure = currentBracket
-        break
-        
-      case 'swiss':
-        const swissUpdate = await updateSwissSystemProgression(match, tournament)
-        affectedMatches = swissUpdate.affectedMatches
-        bracketStructure = swissUpdate.bracketStructure
-        nextRoundMatches = swissUpdate.nextRoundMatches
-        break
+    const allMatches = allMatchesResult.data
+    
+    // Initialize bracket generator
+    const bracketGenerator = new BracketGenerator()
+    
+    // Update bracket progression using new tournament logic
+    const progressionResult = await bracketGenerator.updateBracketProgression(
+      match, 
+      tournament, 
+      allMatches
+    )
+    
+    // Create new matches if needed
+    if (progressionResult.newMatches.length > 0) {
+      const createResult = await matchDB.bulkCreate(progressionResult.newMatches)
+      if (createResult.error) {
+        console.error('Failed to create new matches:', createResult.error)
+      } else {
+        // Add newly created matches to affected matches
+        progressionResult.affectedMatches.push(...createResult.data.successful)
+      }
     }
     
     // Check if tournament is complete
-    const isComplete = await checkTournamentCompletion(tournamentId)
+    const isComplete = bracketGenerator.isComplete(tournament, allMatches)
     if (isComplete) {
       await tournamentDB.update(tournamentId, {
         status: 'completed'
@@ -278,17 +252,24 @@ export async function updateBracketProgression(
     revalidatePath(`/matches/${matchId}`)
     
     // Broadcast bracket progression update via SSE
-    broadcastBracketUpdate(tournamentId, matchId, bracketStructure, affectedMatches.map(m => m.id))
+    broadcastBracketUpdate(
+      tournamentId, 
+      matchId, 
+      progressionResult.updatedBracketStructure, 
+      progressionResult.affectedMatches.map(m => m.id)
+    )
     
     return {
       success: true,
       data: {
         tournamentId,
-        affectedMatches,
-        bracketStructure,
-        nextRoundMatches
+        affectedMatches: progressionResult.affectedMatches,
+        bracketStructure: progressionResult.updatedBracketStructure,
+        nextRoundMatches: progressionResult.newMatches as Match[]
       },
-      message: 'Bracket progression updated successfully'
+      message: progressionResult.isComplete 
+        ? 'Tournament completed successfully!' 
+        : 'Bracket progression updated successfully'
     }
     
   } catch (error) {
@@ -457,6 +438,66 @@ export async function getBracketResults(
     return {
       success: false,
       error: 'An unexpected error occurred while getting bracket results'
+    }
+  }
+}
+
+/**
+ * Calculate tournament standings using advanced bracket logic
+ */
+export async function calculateTournamentStandings(
+  tournamentId: string
+): Promise<ActionResult<{
+  rankings: any[]
+  tieBreakers: any[]
+  metadata: any
+}>> {
+  try {
+    if (!tournamentId) {
+      return {
+        success: false,
+        error: 'Tournament ID is required'
+      }
+    }
+    
+    // Get tournament details
+    const tournamentResult = await tournamentDB.findById(tournamentId)
+    if (tournamentResult.error || !tournamentResult.data) {
+      return {
+        success: false,
+        error: 'Tournament not found'
+      }
+    }
+    
+    const tournament = tournamentResult.data
+    
+    // Get all tournament matches
+    const matchesResult = await matchDB.findByTournament(tournamentId)
+    if (matchesResult.error || !matchesResult.data) {
+      return {
+        success: false,
+        error: 'Failed to retrieve tournament matches'
+      }
+    }
+    
+    const matches = matchesResult.data
+    
+    // Initialize bracket generator
+    const bracketGenerator = new BracketGenerator()
+    
+    // Calculate standings using advanced tournament logic
+    const standings = await bracketGenerator.calculateStandings(tournament, matches)
+    
+    return {
+      success: true,
+      data: standings
+    }
+    
+  } catch (error) {
+    console.error('Error calculating tournament standings:', error)
+    return {
+      success: false,
+      error: 'An unexpected error occurred while calculating tournament standings'
     }
   }
 }
