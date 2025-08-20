@@ -4,6 +4,7 @@ import { TournamentDB } from '@/lib/db/tournaments'
 import { PlayerDB } from '@/lib/db/players'
 import { MatchDB } from '@/lib/db/matches'
 import { Tournament } from '@/types'
+import { formatRelativeDate } from '@/lib/utils/date'
 
 export interface DashboardStats {
   activeTournaments: number
@@ -82,19 +83,113 @@ export async function getRecentTournaments(): Promise<RecentTournament[]> {
   }
 }
 
-function formatRelativeDate(dateString: string): string {
-  const date = new Date(dateString)
-  const now = new Date()
-  const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60))
-  
-  if (diffInHours === 0) {
-    return 'Just now'
-  } else if (diffInHours < 24) {
-    return `${diffInHours} hour${diffInHours !== 1 ? 's' : ''} ago`
-  } else if (diffInHours < 48) {
-    return 'Yesterday'
-  } else {
-    const diffInDays = Math.floor(diffInHours / 24)
-    return `${diffInDays} day${diffInDays !== 1 ? 's' : ''} ago`
+export interface ActiveMatch {
+  id: string
+  tournamentId: string
+  tournamentName: string
+  team1: string[]
+  team2: string[]
+  currentScore: [number, number]
+  court?: string
+  status: 'active' | 'paused'
+  startedAt?: string
+  duration?: number
+}
+
+export interface ActivityEvent {
+  id: string
+  type: 'match_completed' | 'tournament_started' | 'player_registered' | 'match_started' | 'tournament_created'
+  title: string
+  description: string
+  timestamp: string
+  relatedId: string
+  entityType: 'tournament' | 'match' | 'player'
+}
+
+export async function getActiveMatches(): Promise<ActiveMatch[]> {
+  try {
+    const matchResult = await new MatchDB().findByStatus('active')
+    const matches = matchResult.data || []
+    const tournamentResult = await new TournamentDB().findAll()
+    const tournaments = tournamentResult.data || []
+    
+    return matches.map(match => {
+      const tournament = tournaments.find(t => t.id === match.tournamentId)
+      return {
+        id: match.id,
+        tournamentId: match.tournamentId,
+        tournamentName: tournament?.name || 'Unknown Tournament',
+        team1: match.team1.players.map(p => p.displayName),
+        team2: match.team2.players.map(p => p.displayName),
+        currentScore: [match.score?.team1 || 0, match.score?.team2 || 0] as [number, number],
+        court: match.courtId,
+        status: match.status === 'active' ? 'active' : 'paused',
+        startedAt: match.startTime,
+        duration: match.startTime ? Math.floor((new Date().getTime() - new Date(match.startTime).getTime()) / (1000 * 60)) : undefined
+      }
+    })
+  } catch (error) {
+    console.error('Failed to fetch active matches:', error)
+    return []
   }
 }
+
+export async function getRecentActivity(): Promise<ActivityEvent[]> {
+  try {
+    const [tournamentResult, matchResult] = await Promise.all([
+      new TournamentDB().findAll(),
+      new MatchDB().findAll()
+    ])
+    
+    const tournaments = tournamentResult.data || []
+    const matches = matchResult.data || []
+    
+    const events: ActivityEvent[] = []
+    
+    // Add tournament events
+    tournaments
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 5)
+      .forEach(tournament => {
+        events.push({
+          id: `tournament-${tournament.id}`,
+          type: tournament.status === 'active' ? 'tournament_started' : 'tournament_created',
+          title: tournament.status === 'active' ? 'Tournament Started' : 'Tournament Created',
+          description: `${tournament.name} ${tournament.status === 'active' ? 'has begun' : 'was created'}`,
+          timestamp: tournament.createdAt,
+          relatedId: tournament.id,
+          entityType: 'tournament'
+        })
+      })
+    
+    // Add completed match events
+    matches
+      .filter(match => match.status === 'completed')
+      .sort((a, b) => new Date(b.endTime || b.updatedAt).getTime() - new Date(a.endTime || a.updatedAt).getTime())
+      .slice(0, 10)
+      .forEach(match => {
+        const tournament = tournaments.find(t => t.id === match.tournamentId)
+        const winner = match.winner === match.team1.id ? match.team1.players : match.team2.players
+        
+        events.push({
+          id: `match-${match.id}`,
+          type: 'match_completed',
+          title: 'Match Completed',
+          description: `${winner.map(p => p.displayName).join(', ')} won in ${tournament?.name || 'Unknown Tournament'}`,
+          timestamp: match.endTime || match.updatedAt,
+          relatedId: match.id,
+          entityType: 'match'
+        })
+      })
+    
+    // Sort all events by timestamp and return top 15
+    return events
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, 15)
+      
+  } catch (error) {
+    console.error('Failed to fetch recent activity:', error)
+    return []
+  }
+}
+
