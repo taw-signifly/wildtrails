@@ -1,7 +1,10 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { tournamentDB } from '@/lib/db/tournaments'
+import { TournamentSupabaseDB } from '@/lib/db/tournaments-supabase'
+
+// Instance of the tournament database
+const db = new TournamentSupabaseDB()
 import { TournamentFormDataSchema } from '@/lib/validation/tournament'
 import { sanitizeTournamentData, parsePaginationParams, paginateArray } from '@/lib/api'
 import { resultToActionResult, parseFormDataField, parseFormDataBoolean, parseFormDataNumber, parseFormDataDate, formatZodErrors, isValidTournamentType, isValidGameFormat, isValidCourtAssignmentMode, isValidScoringMode } from '@/lib/api/action-utils'
@@ -106,20 +109,22 @@ export async function getTournaments(
     let tournamentsResult
     
     if (filters?.status) {
-      tournamentsResult = await tournamentDB.findByStatus(filters.status)
+      tournamentsResult = await db.findByStatus(filters.status)
     } else if (filters?.type) {
-      tournamentsResult = await tournamentDB.findByType(filters.type)
+      // Note: findByType method needs to be updated to use format field
+      tournamentsResult = await db.findByFormat(filters.type)
     } else if (filters?.format) {
-      tournamentsResult = await tournamentDB.findByFormat(filters.format)
+      tournamentsResult = await db.findByFormat(filters.format)
     } else if (filters?.organizer) {
-      tournamentsResult = await tournamentDB.findByOrganizer(filters.organizer)
+      // Note: findByOrganizer needs to be implemented or use search
+      tournamentsResult = await db.search(filters.organizer)
     } else if (filters?.dateRange) {
-      tournamentsResult = await tournamentDB.findInDateRange(
-        new Date(filters.dateRange.start),
-        new Date(filters.dateRange.end)
+      tournamentsResult = await db.findByDateRange(
+        filters.dateRange.start,
+        filters.dateRange.end
       )
     } else {
-      tournamentsResult = await tournamentDB.findAll()
+      tournamentsResult = await db.findAll()
     }
     
     if (tournamentsResult.error) {
@@ -170,7 +175,7 @@ export async function getTournamentById(id: string): Promise<ActionResult<Tourna
       }
     }
     
-    const result = await tournamentDB.findById(id)
+    const result = await db.findById(id)
     
     if (result.error) {
       return {
@@ -234,7 +239,7 @@ export async function createTournament(formData: FormData): Promise<ActionResult
     }
     
     // Create tournament in database
-    const result = await tournamentDB.create(sanitizedData)
+    const result = await db.create(sanitizedData)
     
     // Convert database result to action result
     const actionResult = resultToActionResult(result, 'Tournament created successfully')
@@ -286,7 +291,7 @@ export async function createTournamentData(data: TournamentFormData): Promise<Ac
     }
     
     // Create tournament in database
-    const result = await tournamentDB.create(sanitizedData)
+    const result = await db.create(sanitizedData)
     
     // Convert database result to action result
     const actionResult = resultToActionResult(result, 'Tournament created successfully')
@@ -350,7 +355,7 @@ export async function updateTournament(id: string, formData: FormData): Promise<
     }
     
     // Update tournament in database
-    const result = await tournamentDB.update(id, sanitizedData)
+    const result = await db.update(id, sanitizedData)
     
     // Convert database result to action result
     const actionResult = resultToActionResult(result, 'Tournament updated successfully')
@@ -415,7 +420,7 @@ export async function updateTournamentData(
     }
     
     // Update tournament in database
-    const result = await tournamentDB.update(id, sanitizedData)
+    const result = await db.update(id, sanitizedData)
     
     // Convert database result to action result
     const actionResult = resultToActionResult(result, 'Tournament updated successfully')
@@ -450,7 +455,7 @@ export async function deleteTournament(id: string): Promise<ActionResult<{ id: s
     }
     
     // Check if tournament exists and can be deleted
-    const tournamentResult = await tournamentDB.findById(id)
+    const tournamentResult = await db.findById(id)
     if (tournamentResult.error || !tournamentResult.data) {
       return {
         success: false,
@@ -469,7 +474,7 @@ export async function deleteTournament(id: string): Promise<ActionResult<{ id: s
     }
     
     // Delete the tournament (soft delete - moves to archived)
-    const result = await tournamentDB.delete(id)
+    const result = await db.delete(id)
     
     if (result.error) {
       return {
@@ -512,7 +517,7 @@ export async function searchTournaments(
     }
     
     // Use the search method from TournamentDB
-    const result = await tournamentDB.search(query.trim())
+    const result = await db.search(query.trim())
     
     if (result.error) {
       return {
