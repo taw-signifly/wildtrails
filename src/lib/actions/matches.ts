@@ -81,7 +81,7 @@ export async function getMatches(
       matchesResult = await matchDB.findByStatus(filters.status)
     } else if (filters?.round && filters?.bracketType) {
       // Find by specific round and bracket type
-      const tournamentId = (filters as any).tournamentId
+      const tournamentId = filters.tournamentId
       if (!tournamentId) {
         return {
           success: false,

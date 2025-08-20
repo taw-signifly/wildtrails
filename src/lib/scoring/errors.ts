@@ -285,14 +285,22 @@ export function logScoringError(error: ScoringError): void {
     critical: 'error'
   }[error.severity]
 
-  console[logLevel as keyof Console]('[ScoringEngine]', {
+  const logData = {
     message: error.message,
     code: error.code,
     severity: error.severity,
     context: error.context,
     recoverable: error.recoverable,
     timestamp: error.timestamp
-  })
+  }
+  
+  if (logLevel === 'info') {
+    console.info('[ScoringEngine]', logData)
+  } else if (logLevel === 'warn') {
+    console.warn('[ScoringEngine]', logData)
+  } else {
+    console.error('[ScoringEngine]', logData)
+  }
 }
 
 /**

@@ -2,9 +2,10 @@
 
 import { revalidatePath } from 'next/cache'
 import { ActionResult } from '@/types/actions'
-import { EndInput, EndScoreResult, ScoreValidationResult, TeamStatistics, TournamentStatistics } from '@/types/scoring'
+import { EndInput, EndScoreResult, ScoreValidationResult, TeamStatistics, TournamentStatistics, ScoringConfiguration } from '@/types/scoring'
 import { Match, GameFormat } from '@/types'
 import { ScoringEngine, createScoringEngine } from '@/lib/scoring/engine'
+import { CacheMetrics } from '@/lib/scoring/cache'
 import { GeometryUtils } from '@/lib/scoring/geometry'
 import { matchDB } from '@/lib/db/matches'
 
@@ -294,7 +295,7 @@ export async function calculateEndScoreAction(
  * Get scoring engine performance metrics
  */
 export async function getScoringEngineMetricsAction(): Promise<ActionResult<{
-  cacheMetrics: Record<string, any>
+  cacheMetrics: Record<string, CacheMetrics>
   totalMemoryUsage: number
   cacheNames: string[]
   overallHitRate: number
@@ -340,7 +341,7 @@ export async function clearScoringCachesAction(): Promise<ActionResult<{ success
  */
 export async function createScoringEngineAction(
   format: GameFormat
-): Promise<ActionResult<{ engineId: string; config: any }>> {
+): Promise<ActionResult<{ engineId: string; config: ScoringConfiguration }>> {
   try {
     const engine = createScoringEngine(format)
     const state = engine.getState()

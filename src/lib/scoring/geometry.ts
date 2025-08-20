@@ -24,10 +24,7 @@ export const COURT_CONSTANTS = {
 // Memoization cache for distance calculations
 const distanceCache = new AdvancedCache<number>({
   maxSize: 10000,
-  ttl: 10 * 60 * 1000, // 10 minutes
-  maxMemoryMB: 50,
-  enableMetrics: true,
-  evictionPolicy: 'lru'
+  ttl: 10 * 60 * 1000 // 10 minutes
 })
 
 /**

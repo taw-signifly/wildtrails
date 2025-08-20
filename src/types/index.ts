@@ -410,6 +410,7 @@ export interface MatchFilters {
   round?: number
   bracketType?: BracketType
   courtId?: string
+  tournamentId?: string
   dateRange?: {
     start: string
     end: string

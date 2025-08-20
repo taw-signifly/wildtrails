@@ -13,7 +13,8 @@ export const PositionSchema = z.object({
 
 export const CourtDimensionsSchema = z.object({
   length: z.number().min(10).max(20, 'Court length must be between 10-20 meters'),
-  width: z.number().min(3).max(6, 'Court width must be between 3-6 meters')
+  width: z.number().min(3).max(6, 'Court width must be between 3-6 meters'),
+  throwingDistance: z.number().min(6).max(10, 'Throwing distance must be between 6-10 meters')
 })
 
 // Boule validation
@@ -196,9 +197,9 @@ export const TeamStatisticsSchema = z.object({
 export const ScoringErrorSchema = z.object({
   code: z.string().min(1),
   message: z.string().min(1),
-  context: z.record(z.unknown()).optional(),
+  context: z.record(z.string(), z.unknown()).optional(),
   severity: z.enum(['low', 'medium', 'high', 'critical']).default('medium'),
-  timestamp: z.string().datetime().default(() => new Date().toISOString())
+  timestamp: z.string().datetime().optional().default(new Date().toISOString())
 })
 
 // Export types derived from schemas

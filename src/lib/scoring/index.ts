@@ -4,6 +4,8 @@
  * rule validation, and comprehensive statistics
  */
 
+import { Match } from '@/types'
+
 // Main Scoring Engine
 export { ScoringEngine, defaultScoringEngine, createScoringEngine } from './engine'
 
@@ -64,9 +66,7 @@ export {
 export {
   AdvancedCache,
   CacheManager,
-  defaultCacheManager,
-  isCacheEntry,
-  isValidCacheKey
+  defaultCacheManager
 } from './cache'
 
 // Server Actions for Next.js integration
@@ -147,8 +147,6 @@ export type {
 
 // Cache types
 export type {
-  CacheEntry,
-  CacheConfig,
   CacheMetrics
 } from './cache'
 
@@ -226,7 +224,7 @@ export function quickCalculateEnd(
  * @returns Simple validation result
  */
 export function quickValidateMatch(
-  match: any
+  match: Match
 ): { valid: boolean; errors: string[] } {
   const result = validateMatchScore(match)
   return {
@@ -243,7 +241,7 @@ export function quickValidateMatch(
  */
 export function quickTeamStats(
   teamId: string,
-  matches: any[]
+  matches: Match[]
 ): {
   wins: number
   losses: number

@@ -34,7 +34,7 @@ import {
 } from './errors'
 
 // Import cache management
-import { AdvancedCache, CacheManager, defaultCacheManager } from './cache'
+import { AdvancedCache, CacheManager, defaultCacheManager, CacheMetrics } from './cache'
 
 // Import all scoring modules
 import { calculateEndScore, validateEndConfiguration, EndCalculationOptions } from './calculator'
@@ -99,7 +99,7 @@ export class ScoringEngine {
       const mergedOptions = { ...defaultOptions, ...options }
       this.options = validateScoringEngineOptions(mergedOptions)
 
-      // Initialize cache manager with proper limits
+      // Initialize cache manager
       this.cacheManager = new CacheManager()
       
       if (this.options.debugMode) {
@@ -576,7 +576,7 @@ export class ScoringEngine {
   public getState(): {
     config: ScoringConfiguration
     options: ScoringEngineOptions
-    cacheMetrics: Record<string, any>
+    cacheMetrics: Record<string, CacheMetrics>
     memoryUsage: number
   } {
     return {
@@ -592,7 +592,7 @@ export class ScoringEngine {
    * @returns Performance metrics
    */
   public getPerformanceMetrics(): {
-    cacheMetrics: Record<string, any>
+    cacheMetrics: Record<string, CacheMetrics>
     totalMemoryUsage: number
     cacheNames: string[]
     overallHitRate: number
