@@ -366,7 +366,7 @@ export function PlayerRegistration() {
           <div className="space-y-4">
             <h3 className="font-medium">Team Formation</h3>
             <p className="text-sm text-muted-foreground">
-              {setupData.basic?.format?.charAt(0).toUpperCase() + setupData.basic?.format?.slice(1)} format requires {getPlayersPerTeam()} players per team
+              {setupData.basic?.format ? setupData.basic.format.charAt(0).toUpperCase() + setupData.basic.format.slice(1) : 'Selected'} format requires {getPlayersPerTeam()} players per team
             </p>
             
             <TeamFormationInterface

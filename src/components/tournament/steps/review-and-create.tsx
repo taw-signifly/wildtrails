@@ -257,7 +257,7 @@ export function ReviewAndCreate() {
             <div className="space-y-2">
               <p className="text-sm font-medium">Seeding Method</p>
               <p className="text-muted-foreground">
-                {setupData.bracket?.seedingType?.charAt(0).toUpperCase() + setupData.bracket?.seedingType?.slice(1) || 'Random'}
+                {setupData.bracket?.seedingType ? setupData.bracket.seedingType.charAt(0).toUpperCase() + setupData.bracket.seedingType.slice(1) : 'Random'}
               </p>
             </div>
             <div className="space-y-2">

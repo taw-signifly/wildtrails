@@ -272,7 +272,7 @@ export function BracketConfiguration() {
                 ).join(' ')}
               </div>
               <div>
-                <strong>Seeding:</strong> {formData.seedingType?.charAt(0).toUpperCase() + formData.seedingType?.slice(1)}
+                <strong>Seeding:</strong> {formData.seedingType ? formData.seedingType.charAt(0).toUpperCase() + formData.seedingType.slice(1) : 'Not set'}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
