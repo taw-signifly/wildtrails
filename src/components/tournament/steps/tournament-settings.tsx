@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useTournamentSetup } from '@/hooks/use-tournament-setup'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -13,6 +13,7 @@ export function TournamentSettings() {
     setupData.settings || {}
   )
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const initializedRef = useRef(false)
 
   useEffect(() => {
     if (setupData.settings) {
@@ -20,19 +21,18 @@ export function TournamentSettings() {
     }
   }, [setupData.settings])
 
-  // Initialize default values for required fields
+  // Initialize default values for required fields - run once
   useEffect(() => {
-    const needsDefaults = !formData.maxPoints || !formData.maxPlayers
-    if (needsDefaults) {
+    if (!initializedRef.current && (!setupData.settings?.maxPoints || !setupData.settings?.maxPlayers)) {
       const newData = {
-        ...formData,
-        maxPoints: formData.maxPoints || 13,
-        maxPlayers: formData.maxPlayers || getRecommendedMaxPlayers()
+        maxPoints: setupData.settings?.maxPoints || 13,
+        maxPlayers: setupData.settings?.maxPlayers || getRecommendedMaxPlayers()
       }
-      setFormData(newData)
+      setFormData(prev => ({ ...prev, ...newData }))
       updateStepData('settings', newData)
+      initializedRef.current = true
     }
-  }, [formData.maxPoints, formData.maxPlayers, updateStepData, formData])
+  }, [setupData.settings, updateStepData])
 
   const handleInputChange = (field: keyof TournamentSettingsForm, value: number | boolean) => {
     const newData = { ...formData, [field]: value }

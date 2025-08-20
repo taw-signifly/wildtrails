@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useTournamentSetup } from '@/hooks/use-tournament-setup'
 import { TournamentTypeSelector } from '../tournament-type-selector'
 import { Card } from '@/components/ui/card'
@@ -13,6 +13,7 @@ export function BasicInformation() {
     setupData.basic || {}
   )
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const initializedRef = useRef(false)
 
   // Update local state when setupData changes
   useEffect(() => {
@@ -21,19 +22,20 @@ export function BasicInformation() {
     }
   }, [setupData.basic])
 
-  // Initialize startDate with default value if not set
+  // Initialize startDate with default value if not set - run once
   useEffect(() => {
-    if (!formData.startDate) {
+    if (!initializedRef.current && !setupData.basic?.startDate) {
       const defaultDate = new Date()
       defaultDate.setDate(defaultDate.getDate() + 1)
       defaultDate.setHours(9, 0, 0, 0)
       const defaultDateString = defaultDate.toISOString()
       
-      const newData = { ...formData, startDate: defaultDateString }
-      setFormData(newData)
+      const newData = { startDate: defaultDateString }
+      setFormData(prev => ({ ...prev, ...newData }))
       updateStepData('basic', newData)
+      initializedRef.current = true
     }
-  }, [formData.startDate, updateStepData, formData])
+  }, [setupData.basic, updateStepData])
 
   const handleInputChange = (field: keyof BasicInformationType, value: string) => {
     const newData = { ...formData, [field]: value }

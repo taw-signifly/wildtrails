@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useTournamentSetup } from '@/hooks/use-tournament-setup'
 import { BracketPreview } from '../bracket-preview'
 import { Card } from '@/components/ui/card'
@@ -12,12 +12,26 @@ export function BracketConfiguration() {
   const [formData, setFormData] = useState<Partial<BracketConfigurationType>>(
     setupData.bracket || { seedingType: 'random', allowByes: true }
   )
+  const initializedRef = useRef(false)
 
   useEffect(() => {
     if (setupData.bracket) {
       setFormData(setupData.bracket)
     }
   }, [setupData.bracket])
+
+  // Initialize default values for required fields - run once
+  useEffect(() => {
+    if (!initializedRef.current && !setupData.bracket?.seedingType) {
+      const newData = {
+        seedingType: 'random' as const,
+        allowByes: true
+      }
+      setFormData(prev => ({ ...prev, ...newData }))
+      updateStepData('bracket', newData)
+      initializedRef.current = true
+    }
+  }, [setupData.bracket, updateStepData])
 
   const handleInputChange = (field: keyof BracketConfigurationType, value: string | boolean) => {
     const newData = { ...formData, [field]: value }
