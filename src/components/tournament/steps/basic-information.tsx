@@ -1,14 +1,15 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
-import { useTournamentSetup } from '@/hooks/use-tournament-setup'
+import { useWizardStore } from '@/stores/wizard-store'
 import { TournamentTypeSelector } from '../tournament-type-selector'
 import { Card } from '@/components/ui/card'
 import type { BasicInformation as BasicInformationType } from '@/lib/validation/tournament-setup'
 import type { TournamentType, GameFormat } from '@/types'
 
 export function BasicInformation() {
-  const { setupData, updateStepData } = useTournamentSetup()
+  const setupData = useWizardStore(state => state.setupData)
+  const updateStepData = useWizardStore(state => state.updateStepData)
   const [formData, setFormData] = useState<Partial<BasicInformationType>>(
     setupData.basic || {}
   )
@@ -28,6 +29,7 @@ export function BasicInformation() {
       const defaultDate = new Date()
       defaultDate.setDate(defaultDate.getDate() + 1)
       defaultDate.setHours(9, 0, 0, 0)
+      // Ensure proper ISO string format for validation
       const defaultDateString = defaultDate.toISOString()
       
       const newData = { startDate: defaultDateString }
@@ -40,7 +42,8 @@ export function BasicInformation() {
   const handleInputChange = (field: keyof BasicInformationType, value: string) => {
     const newData = { ...formData, [field]: value }
     setFormData(newData)
-    updateStepData('basic', newData)
+    // Update global state with just the changed field to preserve other data
+    updateStepData('basic', { [field]: value })
     
     // Clear field error on change
     if (errors[field]) {
@@ -51,13 +54,13 @@ export function BasicInformation() {
   const handleTypeSelect = (type: TournamentType) => {
     const newData = { ...formData, type }
     setFormData(newData)
-    updateStepData('basic', newData)
+    updateStepData('basic', { type })
   }
 
   const handleFormatSelect = (format: GameFormat) => {
     const newData = { ...formData, format }
     setFormData(newData)
-    updateStepData('basic', newData)
+    updateStepData('basic', { format })
   }
 
   // Generate default start date (tomorrow at 9 AM)

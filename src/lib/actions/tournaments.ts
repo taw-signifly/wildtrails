@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { TournamentSupabaseDB } from '@/lib/db/tournaments-supabase'
+import { createServiceRoleClient } from '@/lib/db/supabase'
 
 // Lazy initialization of the tournament database
 let _db: TournamentSupabaseDB | null = null;
@@ -261,6 +262,147 @@ export async function createTournament(formData: FormData): Promise<ActionResult
     return {
       success: false,
       error: 'An unexpected error occurred while creating the tournament'
+    }
+  }
+}
+
+/**
+ * Create a complete tournament setup with players and teams
+ */
+export async function createTournamentSetup(data: {
+  tournament: TournamentFormData;
+  players?: Array<{
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone?: string;
+    club?: string;
+    ranking?: number;
+  }>;
+  teams?: Array<{
+    id: string;
+    name: string;
+    players: string[];
+  }>;
+}): Promise<ActionResult<Tournament>> {
+  try {
+    // First create the tournament
+    const tournamentResult = await createTournamentData(data.tournament)
+    if (!tournamentResult.success) {
+      return tournamentResult
+    }
+
+    const tournament = tournamentResult.data!
+
+    // If players were provided, create them
+    if (data.players && data.players.length > 0) {
+      const supabase = createServiceRoleClient()
+      
+      // Create players in database
+      const createdPlayers = []
+      for (const playerData of data.players) {
+        // Check if player already exists by email
+        const { data: existingPlayers, error: searchError } = await supabase
+          .from('players')
+          .select('id')
+          .eq('email', playerData.email)
+          .limit(1)
+
+        if (searchError) {
+          console.error('Error checking existing player:', searchError)
+          continue
+        }
+
+        let playerId
+        if (existingPlayers && existingPlayers.length > 0) {
+          // Player exists, use existing ID
+          playerId = existingPlayers[0].id
+        } else {
+          // Create new player
+          const { data: newPlayer, error: createError } = await supabase
+            .from('players')
+            .insert({
+              name: `${playerData.firstName} ${playerData.lastName}`,
+              email: playerData.email,
+              phone: playerData.phone,
+              club: playerData.club,
+              rating: playerData.ranking
+            })
+            .select()
+            .single()
+
+          if (createError) {
+            console.error('Error creating player:', createError)
+            continue
+          }
+
+          playerId = newPlayer.id
+        }
+
+        createdPlayers.push({
+          id: playerId,
+          firstName: playerData.firstName,
+          lastName: playerData.lastName,
+          email: playerData.email
+        })
+      }
+
+      // Create teams if provided, otherwise create individual teams for singles
+      if (data.teams && data.teams.length > 0) {
+        // Create teams with assigned players
+        for (const teamData of data.teams) {
+          const { error: teamError } = await supabase
+            .from('teams')
+            .insert({
+              tournament_id: tournament.id,
+              name: teamData.name,
+              type: data.tournament.format // singles, doubles, or triples
+            })
+
+          if (teamError) {
+            console.error('Error creating team:', teamError)
+          }
+        }
+      } else if (data.tournament.format === 'singles') {
+        // For singles, create a team for each player
+        for (const player of createdPlayers) {
+          const { data: team, error: teamError } = await supabase
+            .from('teams')
+            .insert({
+              tournament_id: tournament.id,
+              name: `${player.firstName} ${player.lastName}`,
+              type: 'singles'
+            })
+            .select()
+            .single()
+
+          if (teamError) {
+            console.error('Error creating team for player:', teamError)
+            continue
+          }
+
+          // Associate player with team
+          const { error: memberError } = await supabase
+            .from('team_members')
+            .insert({
+              team_id: team.id,
+              player_id: player.id,
+              role: 'player'
+            })
+
+          if (memberError) {
+            console.error('Error associating player with team:', memberError)
+          }
+        }
+      }
+    }
+
+    return tournamentResult
+  } catch (error) {
+    console.error('Error creating complete tournament setup:', error)
+    return {
+      success: false,
+      error: 'An unexpected error occurred while creating the tournament setup'
     }
   }
 }

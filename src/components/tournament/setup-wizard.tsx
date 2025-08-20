@@ -1,6 +1,7 @@
 'use client'
 
-import { useTournamentSetup } from '@/hooks/use-tournament-setup'
+import { useState, useEffect } from 'react'
+import { useWizardStore } from '@/stores/wizard-store'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -12,24 +13,50 @@ import { TournamentSettings } from './steps/tournament-settings'
 import { PlayerRegistration } from './steps/player-registration'
 import { BracketConfiguration } from './steps/bracket-configuration'
 import { ReviewAndCreate } from './steps/review-and-create'
+import { NextStepButton } from './next-step-button'
 
 export function TournamentSetupWizard() {
-  const {
-    currentStep,
-    steps,
-    currentStepIndex,
-    completionPercentage,
-    canProceed,
-    isFirstStep,
-    isLastStep,
-    isSubmitting,
-    errors,
-    nextStep,
-    prevStep,
-    goToStep,
-    submitTournament,
-    resetWizard,
-  } = useTournamentSetup()
+  const currentStep = useWizardStore(state => state.currentStep)
+  const setupData = useWizardStore(state => state.setupData)
+  const isSubmitting = useWizardStore(state => state.isSubmitting)
+  const errors = useWizardStore(state => state.errors)
+  const setCurrentStep = useWizardStore(state => state.setCurrentStep)
+  const getCanProceedForStep = useWizardStore(state => state.getCanProceedForStep)
+  
+  const steps = ['basic', 'settings', 'players', 'bracket', 'review']
+  const currentStepIndex = steps.indexOf(currentStep)
+  const canProceed = getCanProceedForStep(currentStep)
+  const isFirstStep = currentStep === steps[0]
+  const isLastStep = currentStep === steps[steps.length - 1]
+  
+  // Calculate completion percentage
+  const completionPercentage = Math.round(
+    (steps.slice(0, -1).filter(step => getCanProceedForStep(step)).length / (steps.length - 1)) * 100
+  )
+  
+  // Navigation functions
+  const prevStep = () => {
+    const currentIndex = steps.indexOf(currentStep)
+    const prevIndex = Math.max(currentIndex - 1, 0)
+    setCurrentStep(steps[prevIndex])
+  }
+  
+  const goToStep = (step: string) => {
+    const targetIndex = steps.indexOf(step)
+    const currentIndex = steps.indexOf(currentStep)
+    // Allow going to any previous step or next step if current is valid
+    if (targetIndex <= currentIndex || getCanProceedForStep(currentStep)) {
+      setCurrentStep(step)
+    }
+  }
+  
+  const resetWizard = () => {
+    setCurrentStep('basic')
+    // TODO: Clear setupData
+  }
+
+  // Debug: Log what the wizard receives
+  console.log('Wizard component - canProceed:', canProceed, 'currentStep:', currentStep, 'setupData:', setupData)
 
   const getStepTitle = (step: string) => {
     switch (step) {
@@ -70,13 +97,6 @@ export function TournamentSetupWizard() {
     }
   }
 
-  const handleSubmit = async () => {
-    if (isLastStep) {
-      await submitTournament()
-    } else {
-      nextStep()
-    }
-  }
 
   return (
     <div className="space-y-6">
@@ -187,22 +207,7 @@ export function TournamentSetupWizard() {
               </Button>
             </div>
 
-            <Button
-              onClick={handleSubmit}
-              disabled={!canProceed || isSubmitting}
-              className="min-w-[120px]"
-            >
-              {isSubmitting ? (
-                <div className="flex items-center space-x-2">
-                  <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                  <span>Creating...</span>
-                </div>
-              ) : isLastStep ? (
-                'Create Tournament'
-              ) : (
-                'Next Step'
-              )}
-            </Button>
+            <NextStepButton />
           </div>
         </div>
       </Card>

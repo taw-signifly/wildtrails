@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import type { 
   WizardStep, 
@@ -16,7 +16,7 @@ import {
   validateBracketConfiguration,
   validateCompleteSetup 
 } from '@/lib/validation/tournament-setup'
-import { createTournamentData } from '@/lib/actions/tournaments'
+import { createTournamentSetup } from '@/lib/actions/tournaments'
 import type { TournamentFormData } from '@/types'
 
 interface SetupState {
@@ -32,9 +32,18 @@ const STORAGE_KEY = 'tournament-setup-draft'
 export function useTournamentSetup() {
   const router = useRouter()
   const [currentStep, setCurrentStep] = useState<WizardStep>('basic')
-  const [setupData, setSetupData] = useState<SetupState>({})
+  // Use a ref to ensure single instance across all hook calls
+  const setupDataRef = useRef<SetupState>({})
+  const [setupData, setSetupDataState] = useState<SetupState>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [renderTrigger, setRenderTrigger] = useState(0)
+  
+  const setSetupData = useCallback((newData: SetupState | ((prev: SetupState) => SetupState)) => {
+    const data = typeof newData === 'function' ? newData(setupDataRef.current) : newData
+    setupDataRef.current = data
+    setSetupDataState(data)
+  }, [])
 
   // Load saved data from localStorage on mount with security validation
   useEffect(() => {
@@ -87,6 +96,10 @@ export function useTournamentSetup() {
           // Only set data if we have at least one valid section
           if (Object.keys(validatedData).length > 0) {
             setSetupData(validatedData)
+          } else if (Object.keys(parsed).length > 0) {
+            // Clear invalid localStorage data to prevent endless validation errors
+            console.warn('Clearing invalid localStorage data')
+            localStorage.removeItem(STORAGE_KEY)
           }
         }
       } catch (error) {
@@ -127,22 +140,30 @@ export function useTournamentSetup() {
     step: T,
     data: SetupState[T]
   ) => {
-    setSetupData(prev => ({
-      ...prev,
-      [step]: { ...prev[step], ...data }
-    }))
+    console.log(`updateStepData called: step=${step}`, data)
+    setSetupData(prev => {
+      const newData = {
+        ...prev,
+        [step]: { ...prev[step], ...data }
+      }
+      console.log('New setupData:', newData)
+      return newData
+    })
     setErrors({}) // Clear errors when data updates
+    setRenderTrigger(prev => prev + 1) // Force component re-render
   }, [])
 
   const getCurrentStepIndex = useCallback(() => {
     return STEPS.indexOf(currentStep)
   }, [currentStep])
 
-  const canProceed = useCallback((step: WizardStep): boolean => {
+  const getCanProceedForStep = (step: WizardStep): boolean => {
     switch (step) {
       case 'basic':
         const basic = setupData.basic
-        return !!(basic?.name && basic.type && basic.format && basic.startDate && basic.organizer)
+        const result = !!(basic?.name && basic.type && basic.format && basic.startDate && basic.organizer)
+        console.log('Validation check:', { basic, result })
+        return result
       
       case 'settings':
         const settings = setupData.settings
@@ -162,16 +183,16 @@ export function useTournamentSetup() {
       default:
         return false
     }
-  }, [setupData])
+  }
 
   const nextStep = useCallback(() => {
     const currentIndex = getCurrentStepIndex()
     const nextIndex = Math.min(currentIndex + 1, STEPS.length - 1)
     
-    if (canProceed(currentStep)) {
+    if (getCanProceedForStep(currentStep)) {
       setCurrentStep(STEPS[nextIndex])
     }
-  }, [currentStep, getCurrentStepIndex, canProceed])
+  }, [currentStep, getCurrentStepIndex])
 
   const prevStep = useCallback(() => {
     const currentIndex = getCurrentStepIndex()
@@ -184,13 +205,13 @@ export function useTournamentSetup() {
     const currentIndex = getCurrentStepIndex()
     
     // Allow going to any previous step or next step if current is valid
-    if (targetIndex <= currentIndex || canProceed(currentStep)) {
+    if (targetIndex <= currentIndex || getCanProceedForStep(currentStep)) {
       setCurrentStep(step)
     }
-  }, [currentStep, getCurrentStepIndex, canProceed])
+  }, [currentStep, getCurrentStepIndex])
 
   const submitTournament = useCallback(async () => {
-    if (!canProceed('review')) {
+    if (!getCanProceedForStep('review')) {
       setErrors({ submit: 'Please complete all required steps' })
       return false
     }
@@ -254,7 +275,12 @@ export function useTournamentSetup() {
         settings: settingsResult.data.settings || {}
       }
 
-      const result = await createTournamentData(tournamentData)
+      // Create tournament with players and teams
+      const result = await createTournamentSetup({
+        tournament: tournamentData,
+        players: playersResult.data.players || [],
+        teams: playersResult.data.teams || []
+      })
       
       if (result.success) {
         // Clear saved data on successful creation
@@ -282,7 +308,7 @@ export function useTournamentSetup() {
     } finally {
       setIsSubmitting(false)
     }
-  }, [setupData, canProceed, router])
+  }, [setupData, router])
 
   const resetWizard = useCallback(() => {
     setSetupData({})
@@ -292,9 +318,17 @@ export function useTournamentSetup() {
   }, [])
 
   const getCompletionPercentage = useCallback(() => {
-    const completedSteps = STEPS.slice(0, -1).filter(step => canProceed(step)).length
+    const completedSteps = STEPS.slice(0, -1).filter(step => getCanProceedForStep(step)).length
     return Math.round((completedSteps / (STEPS.length - 1)) * 100)
-  }, [canProceed])
+  }, [setupData])
+
+  // Computed values that depend on state - recalculate on every render to ensure freshness
+  const currentCanProceed = getCanProceedForStep(currentStep)
+  console.log('Hook computed currentCanProceed:', currentCanProceed, 'for step:', currentStep)
+  
+  const completionPercentage = getCompletionPercentage()
+  const currentStepIndex = getCurrentStepIndex()
+
 
   return {
     // State
@@ -313,10 +347,11 @@ export function useTournamentSetup() {
     resetWizard,
     
     // Computed
-    canProceed: canProceed(currentStep),
+    canProceed: currentCanProceed,
     isFirstStep: currentStep === STEPS[0],
     isLastStep: currentStep === STEPS[STEPS.length - 1],
-    completionPercentage: getCompletionPercentage(),
-    currentStepIndex: getCurrentStepIndex(),
+    completionPercentage,
+    currentStepIndex,
+    renderTrigger, // Include trigger to force re-renders
   }
 }

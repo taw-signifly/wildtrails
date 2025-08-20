@@ -9,10 +9,23 @@ import type { BracketConfiguration as BracketConfigurationType } from '@/lib/val
 
 export function BracketConfiguration() {
   const { setupData, updateStepData } = useTournamentSetup()
-  const [formData, setFormData] = useState<Partial<BracketConfigurationType>>(
-    setupData.bracket || { seedingType: 'random', allowByes: true }
-  )
+  const [formData, setFormData] = useState<Partial<BracketConfigurationType>>(() => {
+    // Ensure we always have required fields in initial state
+    const initialData = setupData.bracket || {}
+    return {
+      seedingType: 'random',
+      allowByes: true,
+      ...initialData
+    }
+  })
   const initializedRef = useRef(false)
+
+  // Save initial form data to setup data immediately
+  useEffect(() => {
+    if (!setupData.bracket?.seedingType && formData.seedingType) {
+      updateStepData('bracket', formData)
+    }
+  }, []) // Run once on mount
 
   useEffect(() => {
     if (setupData.bracket) {
@@ -32,6 +45,15 @@ export function BracketConfiguration() {
       initializedRef.current = true
     }
   }, [setupData.bracket, updateStepData])
+
+  // Ensure formData always has required fields
+  useEffect(() => {
+    if (!formData.seedingType) {
+      const newData = { ...formData, seedingType: 'random' as const }
+      setFormData(newData)
+      updateStepData('bracket', newData)
+    }
+  }, [formData, updateStepData])
 
   const handleInputChange = (field: keyof BracketConfigurationType, value: string | boolean) => {
     const newData = { ...formData, [field]: value }

@@ -36,10 +36,13 @@ export class TournamentSupabaseDB extends SupabaseDB<any> {
         allowSpectators: true
       }
 
+      // Convert tournament type (single-elimination) to database format (single_elimination)
+      const dbFormat = validatedFormData.type?.replace(/-/g, '_') || 'single_elimination'
+
       const tournamentData = {
         name: validatedFormData.name,
         description: validatedFormData.description,
-        format: validatedFormData.format,
+        format: dbFormat, // Use tournament type, not game format
         max_players: validatedFormData.maxPlayers,
         start_date: validatedFormData.startDate,
         end_date: (validatedFormData as any).endDate,
@@ -47,7 +50,11 @@ export class TournamentSupabaseDB extends SupabaseDB<any> {
         location: validatedFormData.location,
         settings: {
           ...defaultSettings,
-          ...(validatedFormData.settings || {})
+          ...(validatedFormData.settings || {}),
+          gameFormat: validatedFormData.format, // Store game format in settings
+          organizer: validatedFormData.organizer, // Store organizer in settings since DB doesn't have column
+          maxPoints: validatedFormData.maxPoints, // Store max points in settings
+          shortForm: validatedFormData.shortForm // Store short form in settings
         },
         bracket_data: {}
       }
@@ -62,8 +69,63 @@ export class TournamentSupabaseDB extends SupabaseDB<any> {
         throw new DatabaseError(`Failed to create tournament: ${error.message}`, new Error(error.message))
       }
 
-      return this.validateData(insertedData)
+      // Transform database response to match TypeScript types
+      const transformedData = this.transformDatabaseRecord(insertedData)
+      return this.validateData(transformedData)
     })
+  }
+
+  /**
+   * Transform database record (snake_case) to TypeScript types (camelCase)
+   */
+  private transformDatabaseRecord(dbRecord: any): any {
+    // Helper function to convert PostgreSQL timestamp to ISO string with Z
+    const formatTimestamp = (timestamp: string | null): string | undefined => {
+      if (!timestamp) return undefined
+      return new Date(timestamp).toISOString()
+    }
+
+    return {
+      id: dbRecord.id,
+      name: dbRecord.name,
+      description: dbRecord.description,
+      type: dbRecord.format?.replace(/_/g, '-') || 'single-elimination', // Convert DB format back to type
+      format: dbRecord.settings?.gameFormat || 'singles', // Get game format from settings
+      status: this.mapDatabaseStatusToSchema(dbRecord.status) || 'setup',
+      maxPoints: dbRecord.settings?.maxPoints || 13,
+      shortForm: dbRecord.settings?.shortForm || false,
+      startDate: formatTimestamp(dbRecord.start_date)!,
+      endDate: formatTimestamp(dbRecord.end_date), // Optional field
+      location: dbRecord.location,
+      organizer: dbRecord.settings?.organizer || 'Unknown', // Get from settings
+      maxPlayers: dbRecord.max_players,
+      currentPlayers: dbRecord.current_players || 0,
+      settings: dbRecord.settings || {},
+      stats: {
+        totalMatches: 0,
+        completedMatches: 0,
+        averageMatchDuration: 0,
+        totalEnds: 0,
+        highestScore: 0,
+        averageScore: 0
+      },
+      createdAt: formatTimestamp(dbRecord.created_at)!,
+      updatedAt: formatTimestamp(dbRecord.updated_at)!
+    }
+  }
+
+  /**
+   * Map database status to schema status
+   */
+  private mapDatabaseStatusToSchema(dbStatus: string): string {
+    const statusMap: Record<string, string> = {
+      'draft': 'setup',
+      'registration': 'active',
+      'in_progress': 'active',
+      'completed': 'completed',
+      'cancelled': 'cancelled'
+    }
+    return statusMap[dbStatus] || 'setup'
   }
 
   /**
@@ -107,7 +169,7 @@ export class TournamentSupabaseDB extends SupabaseDB<any> {
         throw new DatabaseError(`Failed to find tournaments by date range: ${error.message}`, new Error(error.message))
       }
 
-      return (data || []).map(record => this.validateData(record))
+      return (data || []).map(record => this.validateData(this.transformDatabaseRecord(record)))
     })
   }
 
@@ -126,7 +188,7 @@ export class TournamentSupabaseDB extends SupabaseDB<any> {
         throw new DatabaseError(`Failed to search tournaments: ${error.message}`, new Error(error.message))
       }
 
-      return (data || []).map(record => this.validateData(record))
+      return (data || []).map(record => this.validateData(this.transformDatabaseRecord(record)))
     })
   }
 
@@ -191,7 +253,7 @@ export class TournamentSupabaseDB extends SupabaseDB<any> {
         throw new DatabaseError(`Failed to find tournaments requiring action: ${error.message}`, new Error(error.message))
       }
 
-      return (data || []).map(record => this.validateData(record))
+      return (data || []).map(record => this.validateData(this.transformDatabaseRecord(record)))
     })
   }
 
