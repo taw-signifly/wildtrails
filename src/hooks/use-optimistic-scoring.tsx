@@ -52,8 +52,8 @@ export function useOptimisticScoring(
     }
 
     // Start with the base match and apply all optimistic actions in order
-    let currentScore = { ...baseMatch.score }
-    let currentEnds = [...baseMatch.ends]
+    let currentScore = { ...baseMatch.score || { team1: 0, team2: 0, isComplete: false } }
+    let currentEnds = [...(baseMatch.ends || [])]
 
     optimisticActions.forEach(action => {
       switch (action.type) {
@@ -86,9 +86,9 @@ export function useOptimisticScoring(
   const calculateNewScore = useCallback((currentScore: Score, teamId: string, points: number): Score => {
     const newScore = { ...currentScore }
     
-    if (teamId === baseMatch?.team1.id) {
+    if (teamId === baseMatch?.team1?.id) {
       newScore.team1 = Math.min(13, currentScore.team1 + points)
-    } else if (teamId === baseMatch?.team2.id) {
+    } else if (teamId === baseMatch?.team2?.id) {
       newScore.team2 = Math.min(13, currentScore.team2 + points)
     }
     
@@ -104,7 +104,7 @@ export function useOptimisticScoring(
 
     const actionId = generateActionId()
     const currentState = optimisticMatch || baseMatch
-    const newScore = calculateNewScore(currentState.score, teamId, points)
+    const newScore = calculateNewScore(currentState.score || { team1: 0, team2: 0, isComplete: false }, teamId, points)
 
     // Add optimistic action
     const optimisticAction: OptimisticAction = {
@@ -112,8 +112,8 @@ export function useOptimisticScoring(
       type: 'score_update',
       timestamp: Date.now(),
       previousState: {
-        score: currentState.score,
-        ends: currentState.ends
+        score: currentState.score || { team1: 0, team2: 0, isComplete: false },
+        ends: currentState.ends || []
       },
       optimisticState: {
         score: newScore
@@ -180,15 +180,15 @@ export function useOptimisticScoring(
       createdAt: new Date().toISOString()
     }
 
-    const newEnds = [...currentState.ends, newEnd]
+    const newEnds = [...(currentState.ends || []), newEnd]
     
     // Calculate new score from ends
     const newScore: Score = {
       team1: newEnds
-        .filter(end => end.winner === baseMatch.team1.id)
+        .filter(end => end.winner === baseMatch.team1?.id)
         .reduce((sum, end) => sum + end.points, 0),
       team2: newEnds
-        .filter(end => end.winner === baseMatch.team2.id)
+        .filter(end => end.winner === baseMatch.team2?.id)
         .reduce((sum, end) => sum + end.points, 0),
       isComplete: false
     }
@@ -201,8 +201,8 @@ export function useOptimisticScoring(
       type: 'end_score',
       timestamp: Date.now(),
       previousState: {
-        score: currentState.score,
-        ends: currentState.ends
+        score: currentState.score || { team1: 0, team2: 0, isComplete: false },
+        ends: currentState.ends || []
       },
       optimisticState: {
         score: newScore,

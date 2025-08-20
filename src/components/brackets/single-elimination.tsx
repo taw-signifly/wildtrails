@@ -33,8 +33,8 @@ export function SingleEliminationBracket({
   const visibleMatches = showByes 
     ? matches 
     : matches.filter(match => 
-        match.team1.id && match.team2.id && 
-        match.team1.name !== 'BYE' && match.team2.name !== 'BYE'
+        match.team1?.id && match.team2?.id && 
+        match.team1?.name !== 'BYE' && match.team2?.name !== 'BYE'
       )
 
   // Calculate bracket progression
@@ -47,7 +47,7 @@ export function SingleEliminationBracket({
   // Find championship match
   const championshipMatch = matches.find(m => m.round === totalRounds)
   const champion = championshipMatch?.status === 'completed' && championshipMatch.winner
-    ? (championshipMatch.team1.id === championshipMatch.winner 
+    ? (championshipMatch.team1?.id === championshipMatch.winner 
         ? championshipMatch.team1 
         : championshipMatch.team2)
     : null
@@ -155,7 +155,7 @@ export function SingleEliminationBracket({
                   {match.roundName || `Round ${match.round}`}
                 </div>
                 <div className="text-xs text-gray-600 mt-1">
-                  {match.team1.name} vs {match.team2.name}
+                  {match.team1?.name || 'TBD'} vs {match.team2?.name || 'TBD'}
                 </div>
                 {match.courtId && (
                   <div className="text-xs text-gray-500 mt-1">
@@ -200,7 +200,7 @@ export function SingleEliminationBracket({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-lg border shadow-sm">
           <div className="text-2xl font-bold text-blue-600">
-            {matches.filter(m => m.team1.id && m.team2.id).length}
+            {matches.filter(m => m.team1?.id && m.team2?.id).length}
           </div>
           <div className="text-sm text-gray-600">Total Matches</div>
         </div>

@@ -12,6 +12,8 @@ export type TournamentStatus = 'setup' | 'active' | 'completed' | 'cancelled'
 
 export type MatchStatus = 'scheduled' | 'active' | 'completed' | 'cancelled'
 
+export type CourtStatus = 'available' | 'occupied' | 'maintenance' | 'reserved'
+
 export type GameFormat = 'singles' | 'doubles' | 'triples'
 
 export type BracketType = 'winner' | 'loser' | 'consolation'
@@ -123,25 +125,36 @@ export interface TeamStats {
 
 export interface Match {
   id: string
-  tournamentId: string
+  tournament_id: string
   round: number
-  roundName: string // "Round 1", "Quarterfinals", "Final", etc.
-  bracketType: BracketType
-  team1: Team
-  team2: Team
-  courtId?: string
-  score: Score
+  match_number: number
+  team1_id?: string
+  team2_id?: string
+  court_id?: string
+  scheduled_time?: string
+  actual_start_time?: string
+  actual_end_time?: string
   status: MatchStatus
-  scheduledTime?: string // ISO date string
-  startTime?: string // ISO date string
-  endTime?: string // ISO date string
-  duration?: number // minutes
-  winner?: string // team ID
-  ends: End[]
+  created_at: string
+  updated_at: string
+  // Legacy fields for compatibility with existing UI components
+  tournamentId?: string
+  roundName?: string
+  bracketType?: BracketType
+  team1?: Team
+  team2?: Team
+  courtId?: string
+  score?: Score
+  scheduledTime?: string
+  startTime?: string
+  endTime?: string
+  duration?: number
+  winner?: string
+  ends?: End[]
   notes?: string
   referee?: string
-  createdAt: string
-  updatedAt: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface Score {
@@ -184,12 +197,12 @@ export interface Court {
   surface: 'gravel' | 'sand' | 'dirt' | 'artificial'
   lighting: boolean
   covered: boolean
-  status: 'available' | 'in-use' | 'maintenance' | 'reserved'
+  status: 'available' | 'occupied' | 'maintenance' | 'reserved'
   currentMatch?: string // match ID
   nextMatch?: string // match ID
   amenities: string[]
-  createdAt: string
-  updatedAt: string
+  created_at: string
+  updated_at: string
 }
 
 export interface CourtDimensions {

@@ -193,16 +193,16 @@ export async function getActiveMatches(): Promise<Result<ActiveMatch[], Database
     const activeMatches: ActiveMatch[] = matches
       .filter(match => match && match.team1 && match.team2)
       .map(match => {
-        const tournament = tournamentMap.get(match.tournamentId)
+        const tournament = tournamentMap.get(match.tournament_id)
         
         const activeMatch: ActiveMatch = {
           id: match.id,
-          tournamentId: match.tournamentId,
+          tournamentId: match.tournament_id,
           tournamentName: tournament ? 
             sanitizeTournamentName(tournament.name) : 
             'Unknown Tournament',
-          team1: match.team1.players.map(p => sanitizePlayerName(p.displayName)),
-          team2: match.team2.players.map(p => sanitizePlayerName(p.displayName)),
+          team1: match.team1?.players.map(p => sanitizePlayerName(p.displayName)) || [],
+          team2: match.team2?.players.map(p => sanitizePlayerName(p.displayName)) || [],
           currentScore: [match.score?.team1 || 0, match.score?.team2 || 0] as [number, number],
           court: match.courtId,
           status: match.status === 'active' ? 'active' : 'paused',
@@ -296,22 +296,22 @@ export async function getRecentActivity(): Promise<Result<ActivityEvent[], Datab
     // Add completed match events
     matches
       .filter(match => match && match.status === 'completed' && match.team1 && match.team2)
-      .sort((a, b) => new Date(b.endTime || b.updatedAt).getTime() - new Date(a.endTime || a.updatedAt).getTime())
+      .sort((a, b) => new Date(b.endTime || b.updated_at).getTime() - new Date(a.endTime || a.updated_at).getTime())
       .slice(0, 10)
       .forEach(match => {
-        const tournament = tournamentMap.get(match.tournamentId)
-        const winner = match.winner === match.team1.id ? match.team1.players : match.team2.players
+        const tournament = tournamentMap.get(match.tournament_id)
+        const winner = match.winner === match.team1?.id ? match.team1?.players || [] : match.team2?.players || []
         
         const event: ActivityEvent = {
           id: `match-${match.id}`,
           type: 'match_completed',
           title: 'Match Completed',
           description: sanitizeDescription(
-            `${winner.map(p => sanitizePlayerName(p.displayName)).join(', ')} won in ${
+            `${winner.map((p: any) => sanitizePlayerName(p.displayName)).join(', ')} won in ${
               tournament ? sanitizeTournamentName(tournament.name) : 'Unknown Tournament'
             }`
           ),
-          timestamp: match.endTime || match.updatedAt,
+          timestamp: match.endTime || match.updated_at || new Date().toISOString(),
           relatedId: match.id,
           entityType: 'match'
         }

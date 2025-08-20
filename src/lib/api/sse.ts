@@ -404,7 +404,7 @@ export function broadcastMatchUpdate(matchId: string, match: Match, changes: str
   broadcastEvent(`match:${matchId}`, event)
   
   // Broadcast to tournament-wide stream
-  broadcastEvent(`tournament:${match.tournamentId}`, event)
+  broadcastEvent(`tournament:${match.tournament_id}`, event)
 }
 
 /**
@@ -457,7 +457,7 @@ export function broadcastMatchStart(matchId: string, match: Match, courtId?: str
   }
   
   broadcastEvent(`match:${matchId}`, event)
-  broadcastEvent(`tournament:${match.tournamentId}`, event)
+  broadcastEvent(`tournament:${match.tournament_id}`, event)
   
   if (courtId) {
     broadcastEvent(`court:${courtId}`, event)
@@ -474,13 +474,13 @@ export function broadcastMatchComplete(matchId: string, match: Match): void {
       matchId,
       match,
       winner: match.winner!,
-      finalScore: match.score,
+      finalScore: match.score || { team1: 0, team2: 0, isComplete: false },
       duration: match.duration
     }
   }
   
   broadcastEvent(`match:${matchId}`, event)
-  broadcastEvent(`tournament:${match.tournamentId}`, event)
+  broadcastEvent(`tournament:${match.tournament_id}`, event)
   
   if (match.courtId) {
     broadcastEvent(`court:${match.courtId}`, event)

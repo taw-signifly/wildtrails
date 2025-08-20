@@ -2,13 +2,12 @@
 
 import { revalidatePath } from 'next/cache'
 import { matchDB } from '@/lib/db/matches'
-import { MatchFormDataSchema, MatchFiltersSchema, EndSchema } from '@/lib/validation/match'
-import { parsePaginationParams, paginateArray } from '@/lib/api'
+import { MatchFormDataSchema, EndSchema } from '@/lib/validation/match'
+import { paginateArray } from '@/lib/api'
 import { resultToActionResult, parseFormDataField, parseFormDataNumber, formatZodErrors } from '@/lib/api/action-utils'
-import { broadcastMatchStart, broadcastMatchComplete, broadcastMatchUpdate } from '@/lib/api/sse'
-import { Match, MatchFormData, MatchFilters, MatchStatus, BracketType, Score } from '@/types'
+import { broadcastMatchStart, broadcastMatchComplete } from '@/lib/api/sse'
+import { Match, MatchFormData, Score, MatchFilters } from '@/types'
 import { ActionResult } from '@/types/actions'
-import { z } from 'zod'
 
 /**
  * Convert FormData to MatchFormData object with type safety
@@ -459,9 +458,9 @@ export async function searchMatches(
     // Filter matches by search criteria
     let filteredMatches = matches.filter(match => {
       // Search in team names
-      const team1Players = match.team1.players.map(p => p.displayName.toLowerCase()).join(' ')
-      const team2Players = match.team2.players.map(p => p.displayName.toLowerCase()).join(' ')
-      const roundName = match.roundName.toLowerCase()
+      const team1Players = match.team1?.players.map((p: any) => p.displayName.toLowerCase()).join(' ') || ''
+      const team2Players = match.team2?.players.map((p: any) => p.displayName.toLowerCase()).join(' ') || ''
+      const roundName = (match.roundName || '').toLowerCase()
       
       return team1Players.includes(lowerQuery) || 
              team2Players.includes(lowerQuery) ||

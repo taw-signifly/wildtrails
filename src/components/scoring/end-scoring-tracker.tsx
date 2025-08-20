@@ -28,23 +28,27 @@ export function EndScoringTracker({
   const [selectedPoints, setSelectedPoints] = useState<number>(0)
   const [endStartTime] = useState<number>(Date.now())
 
-  const currentEndNumber = match.ends.length + 1
-  const isMatchComplete = match.score.isComplete
+  const currentEndNumber = (match.ends?.length || 0) + 1
+  const isMatchComplete = match.score?.isComplete
 
   // Calculate running scores for display
   const runningScores = useMemo(() => {
+    if (!match.team1?.id || !match.team2?.id || !match.ends) {
+      return []
+    }
+    
     const scores: Record<string, number> = { [match.team1.id]: 0, [match.team2.id]: 0 }
     
     return match.ends.map((end) => {
       scores[end.winner] += end.points
       return {
         endNumber: end.endNumber,
-        team1Score: scores[match.team1.id],
-        team2Score: scores[match.team2.id],
+        team1Score: scores[match.team1!.id],
+        team2Score: scores[match.team2!.id],
         endData: end
       }
     })
-  }, [match.ends, match.team1.id, match.team2.id])
+  }, [match.ends, match.team1?.id, match.team2?.id])
 
   const handleSubmitEnd = async () => {
     if (!selectedWinner || !selectedPoints) return
@@ -87,20 +91,20 @@ export function EndScoringTracker({
             </label>
             <div className="grid grid-cols-1 gap-2">
               <Button
-                variant={selectedWinner === match.team1.id ? 'default' : 'outline'}
-                className={`h-12 justify-start ${selectedWinner === match.team1.id ? 'bg-blue-600' : ''}`}
-                onClick={() => setSelectedWinner(match.team1.id)}
+                variant={selectedWinner === match.team1?.id ? 'default' : 'outline'}
+                className={`h-12 justify-start ${selectedWinner === match.team1?.id ? 'bg-blue-600' : ''}`}
+                onClick={() => setSelectedWinner(match.team1?.id || '')}
                 disabled={isSubmitting}
               >
-                <span className="font-medium">{match.team1.name}</span>
+                <span className="font-medium">{match.team1?.name}</span>
               </Button>
               <Button
-                variant={selectedWinner === match.team2.id ? 'default' : 'outline'}
-                className={`h-12 justify-start ${selectedWinner === match.team2.id ? 'bg-blue-600' : ''}`}
-                onClick={() => setSelectedWinner(match.team2.id)}
+                variant={selectedWinner === match.team2?.id ? 'default' : 'outline'}
+                className={`h-12 justify-start ${selectedWinner === match.team2?.id ? 'bg-blue-600' : ''}`}
+                onClick={() => setSelectedWinner(match.team2?.id || '')}
                 disabled={isSubmitting}
               >
-                <span className="font-medium">{match.team2.name}</span>
+                <span className="font-medium">{match.team2?.name}</span>
               </Button>
             </div>
           </div>
@@ -148,7 +152,7 @@ export function EndScoringTracker({
           {/* Validation Messages */}
           {selectedWinner && selectedPoints > 0 && (
             <div className="mt-3 p-2 bg-green-100 border border-green-300 rounded text-sm text-green-700">
-              ✓ {selectedWinner === match.team1.id ? match.team1.name : match.team2.name} wins {selectedPoints} point{selectedPoints > 1 ? 's' : ''}
+              ✓ {selectedWinner === match.team1?.id ? match.team1?.name : match.team2?.name} wins {selectedPoints} point{selectedPoints > 1 ? 's' : ''}
             </div>
           )}
         </div>
@@ -158,10 +162,10 @@ export function EndScoringTracker({
       <div>
         <h4 className="font-medium mb-3 flex items-center justify-between">
           <span>End History</span>
-          <span className="text-sm text-gray-500">{match.ends.length} ends played</span>
+          <span className="text-sm text-gray-500">{match.ends?.length || 0} ends played</span>
         </h4>
 
-        {match.ends.length === 0 ? (
+        {(match.ends?.length || 0) === 0 ? (
           <div className="text-center py-6 text-gray-500">
             <p className="text-sm">No ends played yet</p>
             <p className="text-xs mt-1">Scores will appear here as you play</p>
@@ -179,7 +183,7 @@ export function EndScoringTracker({
             {/* End History Rows */}
             {runningScores.map((endScore, index) => {
               const end = endScore.endData
-              const winnerTeam = end.winner === match.team1.id ? match.team1 : match.team2
+              const winnerTeam = end.winner === match.team1?.id ? match.team1 : match.team2
               const isLatest = index === runningScores.length - 1
 
               return (
@@ -191,7 +195,7 @@ export function EndScoringTracker({
                 >
                   <div className="font-medium">#{end.endNumber}</div>
                   <div className="truncate text-xs">
-                    {winnerTeam.name}
+                    {winnerTeam?.name || 'Unknown'}
                   </div>
                   <div className="font-bold text-center">
                     +{end.points}
@@ -215,13 +219,13 @@ export function EndScoringTracker({
               Match Complete
             </div>
             <div className="text-lg font-bold text-green-900">
-              {match.winner === match.team1.id ? match.team1.name : match.team2.name} wins
+              {match.winner === match.team1?.id ? match.team1?.name : match.team2?.name} wins
             </div>
             <div className="text-sm text-green-700 mt-1">
-              Final Score: {match.score.team1} - {match.score.team2}
+              Final Score: {match.score?.team1} - {match.score?.team2}
             </div>
             <div className="text-xs text-green-600 mt-2">
-              {match.ends.length} ends played
+              {match.ends?.length || 0} ends played
               {match.duration && ` • ${Math.round(match.duration)} minutes`}
             </div>
           </div>

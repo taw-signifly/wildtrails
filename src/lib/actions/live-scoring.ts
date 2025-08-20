@@ -2,12 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 import { matchDB } from '@/lib/db/matches'
-import { ScoreSchema, EndSchema, BouleSchema, PositionSchema } from '@/lib/validation/match'
+import { ScoreSchema, EndSchema, BouleSchema } from '@/lib/validation/match'
 import { resultToActionResult, parseFormDataField, parseFormDataNumber, formatZodErrors } from '@/lib/api/action-utils'
-import { broadcastScoreUpdate, broadcastEndScored, broadcastMatchUpdate } from '@/lib/api/sse'
+import { broadcastScoreUpdate, broadcastEndScored } from '@/lib/api/sse'
 import { Match, Score, End, Boule, Position, MatchStatus } from '@/types'
 import { ActionResult } from '@/types/actions'
-import { z } from 'zod'
 
 /**
  * Convert FormData to Score data for live scoring
@@ -213,7 +212,7 @@ export async function updateMatchScore(matchId: string, scoreUpdate: Partial<Sco
       revalidatePath(`/tournaments/${actionResult.data.tournamentId}`)
       
       // Broadcast real-time score update via SSE
-      broadcastScoreUpdate(matchId, actionResult.data.score)
+      broadcastScoreUpdate(matchId, actionResult.data.score || { team1: 0, team2: 0, isComplete: false })
     }
     
     return actionResult
@@ -279,7 +278,7 @@ export async function submitEndScore(matchId: string, formData: FormData): Promi
     }
     
     // Validate winner is one of the participating teams
-    if (validation.data.winner !== match.team1.id && validation.data.winner !== match.team2.id) {
+    if (validation.data.winner !== match.team1?.id && validation.data.winner !== match.team2?.id) {
       return {
         success: false,
         error: 'Winner must be one of the participating teams',
@@ -299,8 +298,11 @@ export async function submitEndScore(matchId: string, formData: FormData): Promi
       revalidatePath(`/tournaments/${actionResult.data.tournamentId}`)
       
       // Broadcast real-time end scored event via SSE
-      const lastEnd = actionResult.data.ends[actionResult.data.ends.length - 1]
-      broadcastEndScored(matchId, lastEnd, actionResult.data.score)
+      const ends = actionResult.data.ends || []
+      if (ends.length > 0) {
+        const lastEnd = ends[ends.length - 1]
+        broadcastEndScored(matchId, lastEnd, actionResult.data.score || { team1: 0, team2: 0, isComplete: false })
+      }
     }
     
     return actionResult
@@ -454,13 +456,13 @@ export async function validateMatchScore(matchId: string, score: Score): Promise
       const match = matchResult.data
       
       // Validate score consistency with ends
-      const team1EndPoints = match.ends
-        .filter(end => end.winner === match.team1.id)
-        .reduce((sum, end) => sum + end.points, 0)
+      const team1EndPoints = (match.ends || [])
+        .filter((end: any) => end.winner === match.team1?.id)
+        .reduce((sum: any, end: any) => sum + end.points, 0)
       
-      const team2EndPoints = match.ends
-        .filter(end => end.winner === match.team2.id)
-        .reduce((sum, end) => sum + end.points, 0)
+      const team2EndPoints = (match.ends || [])
+        .filter((end: any) => end.winner === match.team2?.id)
+        .reduce((sum: any, end: any) => sum + end.points, 0)
       
       if (score.team1 !== team1EndPoints) {
         errors.push(`Team 1 score (${score.team1}) doesn't match sum of end points (${team1EndPoints})`)
@@ -476,7 +478,7 @@ export async function validateMatchScore(matchId: string, score: Score): Promise
         warnings.push('Large score difference - please verify accuracy')
       }
       
-      if (match.ends.length > 20) {
+      if ((match.ends || []).length > 20) {
         warnings.push('Unusually long game with many ends')
       }
     }
@@ -543,24 +545,24 @@ export async function getMatchProgress(matchId: string): Promise<ActionResult<{
     const match = matchResult.data
     
     // Calculate progress
-    const maxScore = Math.max(match.score.team1, match.score.team2)
+    const maxScore = Math.max(match.score?.team1 || 0, match.score?.team2 || 0)
     const progressPercentage = match.status === 'completed' ? 100 : Math.round((maxScore / 13) * 100)
     
     // Calculate statistics
-    const ends = match.ends
+    const ends = match.ends || []
     const totalEnds = ends.length
     
     let averageEndDuration = 0
     if (totalEnds > 0) {
-      const totalDuration = ends.reduce((sum, end) => sum + (end.duration || 0), 0)
+      const totalDuration = ends.reduce((sum: any, end: any) => sum + (end.duration || 0), 0)
       averageEndDuration = totalDuration / totalEnds
     }
     
-    const team1Points = ends.filter(e => e.winner === match.team1.id).reduce((sum, e) => sum + e.points, 0)
-    const team2Points = ends.filter(e => e.winner === match.team2.id).reduce((sum, e) => sum + e.points, 0)
+    const team1Points = ends.filter((e: any) => e.winner === match.team1?.id).reduce((sum: any, e: any) => sum + e.points, 0)
+    const team2Points = ends.filter((e: any) => e.winner === match.team2?.id).reduce((sum: any, e: any) => sum + e.points, 0)
     
-    const team1Ends = ends.filter(e => e.winner === match.team1.id)
-    const team2Ends = ends.filter(e => e.winner === match.team2.id)
+    const team1Ends = ends.filter((e: any) => e.winner === match.team1?.id)
+    const team2Ends = ends.filter((e: any) => e.winner === match.team2?.id)
     
     const pointsPerEnd = {
       team1: team1Ends.length > 0 ? team1Points / team1Ends.length : 0,
@@ -574,7 +576,7 @@ export async function getMatchProgress(matchId: string): Promise<ActionResult<{
       endNumber: 0
     }
     
-    ends.forEach(end => {
+    ends.forEach((end: any) => {
       if (end.points > largestEnd.points) {
         largestEnd = {
           points: end.points,
@@ -598,7 +600,7 @@ export async function getMatchProgress(matchId: string): Promise<ActionResult<{
         match,
         progress: {
           percentage: progressPercentage,
-          currentScore: match.score,
+          currentScore: match.score || { team1: 0, team2: 0, isComplete: false },
           totalEnds,
           estimatedTimeRemaining
         },
@@ -669,23 +671,23 @@ export async function getMatchHistory(matchId: string): Promise<ActionResult<{
     }
     
     // Add end events
-    match.ends.forEach(end => {
-      const winnerTeam = end.winner === match.team1.id ? match.team1 : match.team2
+    (match.ends || []).forEach((end: any) => {
+      const winnerTeam = end.winner === match.team1?.id ? match.team1 : match.team2
       history.push({
         timestamp: end.createdAt,
         type: 'end',
-        description: `End ${end.endNumber}: ${winnerTeam.name} scores ${end.points} point${end.points !== 1 ? 's' : ''}`,
+        description: `End ${end.endNumber}: ${winnerTeam?.name || 'Unknown Team'} scores ${end.points} point${end.points !== 1 ? 's' : ''}`,
         data: end
       })
     })
     
     // Add match completion event
     if (match.status === 'completed' && match.endTime) {
-      const winnerTeam = match.winner === match.team1.id ? match.team1 : match.team2
+      const winnerTeam = match.winner === match.team1?.id ? match.team1 : match.team2
       history.push({
         timestamp: match.endTime,
         type: 'match_complete',
-        description: `Match completed - ${winnerTeam.name} wins ${match.score.team1}-${match.score.team2}`,
+        description: `Match completed - ${winnerTeam?.name || 'Unknown Team'} wins ${match.score?.team1 || 0}-${match.score?.team2 || 0}`,
         data: { winner: match.winner, finalScore: match.score }
       })
     }
@@ -749,11 +751,11 @@ export async function getEndByEndDetails(matchId: string): Promise<ActionResult<
     let team1Cumulative = 0
     let team2Cumulative = 0
     
-    for (const end of match.ends) {
+    for (const end of (match.ends || [] as any[])) {
       // Update cumulative scores
-      if (end.winner === match.team1.id) {
+      if (end.winner === match.team1?.id) {
         team1Cumulative += end.points
-      } else if (end.winner === match.team2.id) {
+      } else if (end.winner === match.team2?.id) {
         team2Cumulative += end.points
       }
       
@@ -812,7 +814,7 @@ export async function undoLastEnd(matchId: string): Promise<ActionResult<Match>>
     
     const match = matchResult.data
     
-    if (match.ends.length === 0) {
+    if ((match.ends || []).length === 0) {
       return {
         success: false,
         error: 'No ends to undo'
@@ -827,15 +829,15 @@ export async function undoLastEnd(matchId: string): Promise<ActionResult<Match>>
     }
     
     // Remove last end and recalculate score
-    const updatedEnds = match.ends.slice(0, -1)
+    const updatedEnds = (match.ends || []).slice(0, -1)
     
     const team1Score = updatedEnds
-      .filter(e => e.winner === match.team1.id)
-      .reduce((sum, e) => sum + e.points, 0)
+      .filter((e: any) => e.winner === match.team1?.id)
+      .reduce((sum: any, e: any) => sum + e.points, 0)
     
     const team2Score = updatedEnds
-      .filter(e => e.winner === match.team2.id)
-      .reduce((sum, e) => sum + e.points, 0)
+      .filter((e: any) => e.winner === match.team2?.id)
+      .reduce((sum: any, e: any) => sum + e.points, 0)
     
     const updatedScore: Score = {
       team1: team1Score,

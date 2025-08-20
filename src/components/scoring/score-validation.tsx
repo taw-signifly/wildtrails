@@ -33,7 +33,7 @@ export function ScoreValidationDisplay({
     const validateMatch = async () => {
       setIsValidating(true)
       try {
-        const result = await validateMatchScore(match.id, match.score)
+        const result = await validateMatchScore(match.id, match.score!)
         if (result.success && result.data) {
           // result.data is now properly typed as ValidationResult
           setValidation(result.data)
@@ -52,7 +52,7 @@ export function ScoreValidationDisplay({
     if (match && match.id) {
       validateMatch()
     }
-  }, [match.id, match.score, match.ends.length])
+  }, [match.id, match.score, match.ends?.length])
 
   // Don't render if no validation data and no errors
   if (!validation && !lastError && !isValidating) {

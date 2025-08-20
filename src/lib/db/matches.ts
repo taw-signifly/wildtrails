@@ -5,7 +5,7 @@ import { MatchSchema, MatchFormDataSchema, ScoreSchema, EndSchema } from '@/lib/
 /**
  * Match-specific database operations
  */
-export class MatchDB extends BaseDB<Match> {
+export class MatchDB extends BaseDB<any> {
   constructor(config?: Partial<DatabaseConfig>) {
     super(
       'matches',
@@ -64,8 +64,8 @@ export class MatchDB extends BaseDB<Match> {
       }
       const matches = matchesResult.data
       return matches.filter(match => 
-        match.team1.players.some(p => p.id === playerId) ||
-        match.team2.players.some(p => p.id === playerId)
+        match.team1.players.some((p: any) => p.id === playerId) ||
+        match.team2.players.some((p: any) => p.id === playerId)
       )
     })
   }
@@ -348,7 +348,7 @@ export class MatchDB extends BaseDB<Match> {
       }
 
       const match = matchResult.data
-      const endIndex = match.ends.findIndex(e => e.id === endId)
+      const endIndex = match.ends.findIndex((e: any) => e.id === endId)
       if (endIndex === -1) {
         throw new DatabaseError(`End with ID ${endId} not found in match`)
       }
@@ -753,7 +753,7 @@ export const MatchUtils = {
     if (match.status === 'scheduled') return 0
     
     // For active matches, calculate based on score (out of 13)
-    const maxScore = Math.max(match.score.team1, match.score.team2)
+    const maxScore = Math.max(match.score?.team1 || 0, match.score?.team2 || 0)
     return Math.round((maxScore / 13) * 100)
   },
 
@@ -762,7 +762,7 @@ export const MatchUtils = {
    */
   getWinnerTeam: (match: Match): Team | null => {
     if (!match.winner) return null
-    return match.winner === match.team1.id ? match.team1 : match.team2
+    return match.winner === match.team1?.id ? match.team1 : match.team2 || null
   },
 
   /**
@@ -770,7 +770,7 @@ export const MatchUtils = {
    */
   getLoserTeam: (match: Match): Team | null => {
     if (!match.winner) return null
-    return match.winner === match.team1.id ? match.team2 : match.team1
+    return match.winner === match.team1?.id ? (match.team2 || null) : (match.team1 || null)
   },
 
   /**
@@ -781,7 +781,7 @@ export const MatchUtils = {
     if (match.status === 'scheduled') return 'Scheduled'
     if (match.status === 'active') return 'In Progress'
     
-    return `${match.score.team1} - ${match.score.team2}`
+    return `${match.score?.team1 || 0} - ${match.score?.team2 || 0}`
   },
 
   /**
@@ -790,19 +790,19 @@ export const MatchUtils = {
   didPlayerWin: (match: Match, playerId: string): boolean | null => {
     if (!match.winner || match.status !== 'completed') return null
     
-    const winningTeam = match.winner === match.team1.id ? match.team1 : match.team2
-    return winningTeam.players.some(p => p.id === playerId)
+    const winningTeam = match.winner === match.team1?.id ? match.team1 : match.team2
+    return winningTeam?.players.some((p: any) => p.id === playerId) || false
   },
 
   /**
    * Get opponent team for a player
    */
   getOpponentTeam: (match: Match, playerId: string): Team | null => {
-    const isInTeam1 = match.team1.players.some(p => p.id === playerId)
-    const isInTeam2 = match.team2.players.some(p => p.id === playerId)
+    const isInTeam1 = match.team1?.players.some((p: any) => p.id === playerId) || false
+    const isInTeam2 = match.team2?.players.some((p: any) => p.id === playerId) || false
     
-    if (isInTeam1) return match.team2
-    if (isInTeam2) return match.team1
+    if (isInTeam1) return match.team2 || null
+    if (isInTeam2) return match.team1 || null
     
     return null
   }

@@ -406,7 +406,7 @@ export async function advanceWinnerToBracket(
     const match = matchResult.data
     
     // Use existing bracket progression logic
-    return await updateBracketProgression(match.tournamentId, matchId)
+    return await updateBracketProgression(match.tournament_id, matchId)
     
   } catch (error) {
     console.error('Error advancing winner to bracket:', error)
@@ -542,7 +542,7 @@ function buildBracketNodesFromMatches(matches: Match[]): BracketNode[] {
       matchId: match.id,
       round: match.round,
       position: 0, // Will be calculated based on bracket structure
-      bracketType: match.bracketType,
+      bracketType: match.bracketType || 'winner',
       team1: match.team1,
       team2: match.team2,
       winner: match.winner

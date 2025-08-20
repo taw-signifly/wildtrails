@@ -100,18 +100,18 @@ export async function processEndScoringAction(
     }
 
     // Update match score  
-    if (result.data.winner === matchResult.data.team1.id) {
-      updatedMatch.score.team1 += result.data.points
+    if (result.data.winner === matchResult.data.team1?.id) {
+      updatedMatch.score!.team1 += result.data.points
     } else {
-      updatedMatch.score.team2 += result.data.points
+      updatedMatch.score!.team2 += result.data.points
     }
 
     // Check if game is complete
-    if (updatedMatch.score.team1 >= 13 || updatedMatch.score.team2 >= 13) {
-      updatedMatch.score.isComplete = true
+    if (updatedMatch.score!.team1 >= 13 || updatedMatch.score!.team2 >= 13) {
+      updatedMatch.score!.isComplete = true
       updatedMatch.status = 'completed'
       updatedMatch.endTime = new Date().toISOString()
-      updatedMatch.winner = updatedMatch.score.team1 >= 13 ? matchResult.data.team1.id : matchResult.data.team2.id
+      updatedMatch.winner = updatedMatch.score!.team1 >= 13 ? matchResult.data.team1?.id! : matchResult.data.team2?.id!
     }
 
     // Save updated match
@@ -198,7 +198,7 @@ export async function calculateTeamStatisticsAction(
 
     // Filter matches for the team
     let teamMatches = matchesResult.data.filter(match => 
-      match.team1.id === teamId || match.team2.id === teamId
+      match.team1?.id === teamId || match.team2?.id === teamId
     )
 
     // Filter by tournament if specified

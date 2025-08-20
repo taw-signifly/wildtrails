@@ -188,6 +188,29 @@ export const PhoneSchema = z.string().regex(/^[\+]?[1-9][\d]{0,15}$/, 'Invalid p
 export const URLSchema = z.string().url('Invalid URL format')
 export const ColorSchema = z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color format')
 
+// Court Schema
+export const CourtDimensionsSchema = z.object({
+  length: z.number().min(10).max(30), // meters
+  width: z.number().min(3).max(8), // meters  
+  throwingDistance: z.number().min(6).max(10) // meters
+})
+
+export const CourtSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(100),
+  location: z.string().min(1).max(200),
+  dimensions: CourtDimensionsSchema,
+  surface: z.enum(['gravel', 'sand', 'dirt', 'artificial']),
+  lighting: z.boolean(),
+  covered: z.boolean(),
+  status: z.enum(['available', 'occupied', 'maintenance', 'reserved']),
+  currentMatch: z.string().optional(),
+  nextMatch: z.string().optional(),
+  amenities: z.array(z.string()),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime()
+})
+
 // Common validation patterns
 export const NameSchema = z.string()
   .min(1, 'Name is required')
@@ -222,6 +245,8 @@ export type Bracket = z.infer<typeof BracketSchema>
 export type BracketRound = z.infer<typeof BracketRoundSchema>
 export type Standing = z.infer<typeof StandingSchema>
 export type Pagination = z.infer<typeof PaginationSchema>
+export type CourtDimensions = z.infer<typeof CourtDimensionsSchema>
+export type Court = z.infer<typeof CourtSchema>
 export type PlayerCheckinData = z.infer<typeof PlayerCheckinDataSchema>
 export type TournamentStatusData = z.infer<typeof TournamentStatusDataSchema>
 export type TournamentUpdateEvent = z.infer<typeof TournamentUpdateEventSchema>

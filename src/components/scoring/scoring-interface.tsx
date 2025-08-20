@@ -151,19 +151,19 @@ export function ScoringInterface({
             {/* Team Score Cards */}
             <div className="xl:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
               <TeamScoreCard
-                team={displayMatch.team1}
-                score={displayMatch.score.team1}
-                isWinner={displayMatch.winner === displayMatch.team1.id}
-                isActive={!displayMatch.score.isComplete}
-                onScoreUpdate={(points) => updateScore(displayMatch.team1.id, points)}
+                team={displayMatch.team1!}
+                score={displayMatch.score?.team1 || 0}
+                isWinner={displayMatch.winner === displayMatch.team1?.id}
+                isActive={!displayMatch.score?.isComplete}
+                onScoreUpdate={(points) => updateScore(displayMatch.team1?.id!, points)}
                 disabled={isSubmitting}
               />
               <TeamScoreCard
-                team={displayMatch.team2}
-                score={displayMatch.score.team2}
-                isWinner={displayMatch.winner === displayMatch.team2.id}
-                isActive={!displayMatch.score.isComplete}
-                onScoreUpdate={(points) => updateScore(displayMatch.team2.id, points)}
+                team={displayMatch.team2!}
+                score={displayMatch.score?.team2 || 0}
+                isWinner={displayMatch.winner === displayMatch.team2?.id}
+                isActive={!displayMatch.score?.isComplete}
+                onScoreUpdate={(points) => updateScore(displayMatch.team2?.id!, points)}
                 disabled={isSubmitting}
               />
             </div>
@@ -224,16 +224,16 @@ function MatchSelectionCard({
       
       <div className="space-y-2">
         <div className="text-sm font-medium">
-          {match.team1.name} vs {match.team2.name}
+          {match.team1?.name || 'TBD'} vs {match.team2?.name || 'TBD'}
         </div>
         
         {status === 'active' && (
           <div className="flex justify-between text-sm">
             <span className="font-mono">
-              {match.score.team1} - {match.score.team2}
+              {match.score?.team1 || 0} - {match.score?.team2 || 0}
             </span>
             <span className="text-gray-500">
-              End {match.ends.length + 1}
+              End {(match.ends?.length || 0) + 1}
             </span>
           </div>
         )}

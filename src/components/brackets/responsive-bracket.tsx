@@ -177,7 +177,7 @@ export function ResponsiveBracket({
                         onClick={() => onMatchSelect?.(match)}
                       >
                         <div className="text-sm font-medium">
-                          {match.team1.name} vs {match.team2.name}
+                          {match.team1?.name || 'TBD'} vs {match.team2?.name || 'TBD'}
                         </div>
                         <div className="text-xs text-gray-600 flex justify-between">
                           <span>{match.status}</span>
