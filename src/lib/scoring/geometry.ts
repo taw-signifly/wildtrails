@@ -1,9 +1,12 @@
 import { Position, CourtDimensions, Boule } from '@/types'
 import { RelativePosition, DistanceCalculationResult } from '@/types/scoring'
+import { AdvancedCache } from './cache'
+import { createGeometryError } from './errors'
 
 /**
  * Geometry and distance calculation utilities for Petanque scoring
  * Handles coordinate system operations, distance measurements, and position validation
+ * Includes memoization for performance optimization
  */
 
 // Constants for Petanque court and equipment dimensions
@@ -18,19 +21,96 @@ export const COURT_CONSTANTS = {
   MEASUREMENT_THRESHOLD: 2,   // cm - when physical measurement needed
 } as const
 
+// Memoization cache for distance calculations
+const distanceCache = new AdvancedCache<number>({
+  maxSize: 10000,
+  ttl: 10 * 60 * 1000, // 10 minutes
+  maxMemoryMB: 50,
+  enableMetrics: true,
+  evictionPolicy: 'lru'
+})
+
 /**
- * Calculate Euclidean distance between two positions
+ * Generate cache key for position pair
+ */
+function getDistanceCacheKey(pos1: Position, pos2: Position): string {
+  // Normalize positions to ensure consistent keys for equivalent positions
+  const x1 = Math.round(pos1.x * 1000) / 1000
+  const y1 = Math.round(pos1.y * 1000) / 1000
+  const x2 = Math.round(pos2.x * 1000) / 1000
+  const y2 = Math.round(pos2.y * 1000) / 1000
+  
+  // Create deterministic key regardless of order
+  if (x1 < x2 || (x1 === x2 && y1 <= y2)) {
+    return `${x1},${y1}-${x2},${y2}`
+  } else {
+    return `${x2},${y2}-${x1},${y1}`
+  }
+}
+
+/**
+ * Calculate Euclidean distance between two positions with memoization
  * @param pos1 First position
  * @param pos2 Second position
  * @returns Distance in meters, converted to cm for precision
  */
 export function calculateDistance(pos1: Position, pos2: Position): number {
-  const deltaX = pos2.x - pos1.x
-  const deltaY = pos2.y - pos1.y
-  const distanceInMeters = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
-  
-  // Convert to centimeters for scoring precision
-  return Math.round(distanceInMeters * 100 * 10) / 10  // Round to 0.1cm precision
+  try {
+    // Validate input positions
+    if (!isValidPosition(pos1) || !isValidPosition(pos2)) {
+      throw createGeometryError(
+        'Invalid position coordinates provided',
+        'calculate_distance',
+        { pos1, pos2 }
+      )
+    }
+
+    const cacheKey = getDistanceCacheKey(pos1, pos2)
+    
+    // Check cache first
+    const cached = distanceCache.get(cacheKey)
+    if (cached !== null) {
+      return cached
+    }
+
+    // Calculate distance
+    const deltaX = pos2.x - pos1.x
+    const deltaY = pos2.y - pos1.y
+    const distanceInMeters = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
+    
+    // Convert to centimeters for scoring precision
+    const result = Math.round(distanceInMeters * 100 * 10) / 10  // Round to 0.1cm precision
+    
+    // Cache the result
+    distanceCache.set(cacheKey, result)
+    
+    return result
+  } catch (error) {
+    if (error instanceof Error && error.name === 'GeometryError') {
+      throw error
+    }
+    throw createGeometryError(
+      `Distance calculation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      'calculate_distance',
+      { pos1, pos2 }
+    )
+  }
+}
+
+/**
+ * Validate position coordinates
+ */
+function isValidPosition(pos: Position): boolean {
+  return (
+    typeof pos === 'object' &&
+    pos !== null &&
+    typeof pos.x === 'number' &&
+    typeof pos.y === 'number' &&
+    !isNaN(pos.x) &&
+    !isNaN(pos.y) &&
+    isFinite(pos.x) &&
+    isFinite(pos.y)
+  )
 }
 
 /**
@@ -368,6 +448,39 @@ export function findOptimalJackPosition(boules: Position[]): Position {
 }
 
 /**
+ * Clear geometry calculation cache
+ */
+export function clearGeometryCache(): void {
+  distanceCache.clear()
+}
+
+/**
+ * Get geometry cache metrics
+ */
+export function getGeometryMetrics() {
+  return distanceCache.getMetrics()
+}
+
+/**
+ * Warm up cache with common calculations
+ */
+export function warmupGeometryCache(positions: Position[]): void {
+  const start = Date.now()
+  let calculations = 0
+  
+  // Pre-calculate distances between all position pairs
+  for (let i = 0; i < positions.length; i++) {
+    for (let j = i + 1; j < positions.length; j++) {
+      calculateDistance(positions[i], positions[j])
+      calculations++
+    }
+  }
+  
+  const duration = Date.now() - start
+  console.log(`Geometry cache warmed up: ${calculations} calculations in ${duration}ms`)
+}
+
+/**
  * Export all geometry utility functions
  */
 export const GeometryUtils = {
@@ -388,5 +501,8 @@ export const GeometryUtils = {
   generateMeasurementGrid,
   calculatePlayArea,
   findOptimalJackPosition,
+  clearGeometryCache,
+  getGeometryMetrics,
+  warmupGeometryCache,
   COURT_CONSTANTS
 } as const

@@ -1,4 +1,5 @@
 import { Match, Score, End, Boule, Position, GameFormat } from '@/types'
+import { ActionResult } from '@/types/actions'
 import { 
   EndScoreResult, 
   ScoringConfiguration, 
@@ -12,6 +13,29 @@ import {
   ScoringEngineState
 } from '@/types/scoring'
 
+// Import validation schemas
+import { 
+  validateEndInput, 
+  validateScoringConfiguration, 
+  validateScoringEngineOptions,
+  validateTeamStatistics,
+  TeamStatisticsSchema
+} from './schemas'
+
+// Import error handling
+import { 
+  ScoringError, 
+  ValidationError, 
+  CalculationError, 
+  CacheError,
+  createValidationError,
+  createCalculationError,
+  createCacheError
+} from './errors'
+
+// Import cache management
+import { AdvancedCache, CacheManager, defaultCacheManager } from './cache'
+
 // Import all scoring modules
 import { calculateEndScore, validateEndConfiguration, EndCalculationOptions } from './calculator'
 import { validateMatchScore } from './validation'
@@ -23,34 +47,74 @@ import { GeometryUtils } from './geometry'
  * Main Petanque Scoring Engine
  * Integrates all scoring components into a unified interface
  */
+/**
+ * Type guards for runtime type safety
+ */
+function isTeamStatistics(value: unknown): value is TeamStatistics {
+  try {
+    TeamStatisticsSchema.parse(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function isScoreValidationResult(value: unknown): value is ScoreValidationResult {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'valid' in value &&
+    'errors' in value &&
+    'warnings' in value &&
+    'suggestions' in value &&
+    'ruleViolations' in value
+  )
+}
+
+/**
+ * Main Petanque Scoring Engine with comprehensive error handling and type safety
+ */
 export class ScoringEngine {
   private config: ScoringConfiguration
   private options: ScoringEngineOptions
-  private state: ScoringEngineState
+  private cacheManager: CacheManager
 
   constructor(
     config?: Partial<ScoringConfiguration>,
     options?: Partial<ScoringEngineOptions>
   ) {
-    // Initialize configuration with defaults
-    this.config = {
-      ...createDefaultScoringConfiguration('triples'),
-      ...config
-    }
+    try {
+      // Validate and initialize configuration
+      const defaultConfig = createDefaultScoringConfiguration('triples')
+      const mergedConfig = { ...defaultConfig, ...config }
+      this.config = validateScoringConfiguration(mergedConfig)
 
-    // Initialize options with defaults
-    this.options = {
-      precision: 0.1,
-      measurementThreshold: 2,
-      confidenceThreshold: 0.8,
-      debugMode: false,
-      ...options
-    }
+      // Validate and initialize options
+      const defaultOptions = {
+        precision: 0.1,
+        measurementThreshold: 2,
+        confidenceThreshold: 0.8,
+        debugMode: false
+      }
+      const mergedOptions = { ...defaultOptions, ...options }
+      this.options = validateScoringEngineOptions(mergedOptions)
 
-    // Initialize state
-    this.state = {
-      validationCache: new Map(),
-      statisticsCache: new Map()
+      // Initialize cache manager with proper limits
+      this.cacheManager = new CacheManager()
+      
+      if (this.options.debugMode) {
+        console.log('ScoringEngine initialized:', {
+          config: this.config,
+          options: this.options
+        })
+      }
+    } catch (error) {
+      throw createValidationError(
+        `Failed to initialize ScoringEngine: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'constructor',
+        undefined,
+        { config, options }
+      )
     }
   }
 
@@ -60,23 +124,45 @@ export class ScoringEngine {
    * @param jack Jack position
    * @param teamIds Participating team IDs
    * @param options Calculation options
-   * @returns End score result
+   * @returns ActionResult with end score result
    */
   public calculateEndScore(
     boules: Boule[],
     jack: Position,
     teamIds: string[],
     options?: Partial<EndCalculationOptions>
-  ): EndScoreResult {
-    const calculationOptions: EndCalculationOptions = {
-      measurementThreshold: this.options.measurementThreshold,
-      allowTies: false,
-      requireAllBoules: false,
-      debugMode: this.options.debugMode,
-      ...options
-    }
-
+  ): ActionResult<EndScoreResult> {
     try {
+      // Validate inputs
+      if (!Array.isArray(boules) || boules.length === 0) {
+        return {
+          success: false,
+          error: 'At least one boule is required for end calculation'
+        }
+      }
+
+      if (!jack || typeof jack.x !== 'number' || typeof jack.y !== 'number') {
+        return {
+          success: false,
+          error: 'Valid jack position is required'
+        }
+      }
+
+      if (!Array.isArray(teamIds) || teamIds.length < 2) {
+        return {
+          success: false,
+          error: 'At least two team IDs are required'
+        }
+      }
+
+      const calculationOptions: EndCalculationOptions = {
+        measurementThreshold: this.options.measurementThreshold,
+        allowTies: false,
+        requireAllBoules: false,
+        debugMode: this.options.debugMode,
+        ...options
+      }
+
       const result = calculateEndScore(boules, jack, teamIds, calculationOptions)
       
       if (this.options.debugMode) {
@@ -92,12 +178,16 @@ export class ScoringEngine {
         })
       }
 
-      return result
+      return { success: true, data: result }
     } catch (error) {
       if (this.options.debugMode) {
         console.error('ScoringEngine.calculateEndScore error:', error)
       }
-      throw error
+      
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'End calculation failed'
+      }
     }
   }
 
@@ -105,33 +195,50 @@ export class ScoringEngine {
    * Validate match score against Petanque rules
    * @param match Match to validate
    * @param options Validation options
-   * @returns Validation result
+   * @returns ActionResult with validation result
    */
   public validateMatchScore(
     match: Match,
     options?: Partial<ValidationOptions>
-  ): ScoreValidationResult {
-    const cacheKey = `${match.id}-${match.updatedAt}`
-    
-    // Check cache first
-    if (this.state.validationCache.has(cacheKey)) {
-      return this.state.validationCache.get(cacheKey)!
-    }
+  ): ActionResult<ScoreValidationResult> {
+    try {
+      // Validate input
+      if (!match || !match.id) {
+        return {
+          success: false,
+          error: 'Valid match object with ID is required'
+        }
+      }
 
-    const validationOptions: ValidationOptions = {
-      strict: true,
-      allowManualOverrides: false,
-      validateProgression: true,
-      checkIntegrity: true,
-      ...options
-    }
+      const cacheKey = `validation-${match.id}-${match.updatedAt}`
+      const validationCache = this.cacheManager.getCache<ScoreValidationResult>('validation')
+      
+      // Check cache first with type safety
+      const cached = validationCache.get(cacheKey)
+      if (cached !== null && isScoreValidationResult(cached)) {
+        return { success: true, data: cached }
+      }
 
-    const result = validateMatchScore(match, validationOptions)
-    
-    // Cache result
-    this.state.validationCache.set(cacheKey, result)
-    
-    return result
+      const validationOptions: ValidationOptions = {
+        strict: true,
+        allowManualOverrides: false,
+        validateProgression: true,
+        checkIntegrity: true,
+        ...options
+      }
+
+      const result = validateMatchScore(match, validationOptions)
+      
+      // Cache result safely
+      validationCache.set(cacheKey, result)
+      
+      return { success: true, data: result }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Match validation failed'
+      }
+    }
   }
 
   /**
@@ -175,59 +282,87 @@ export class ScoringEngine {
   }
 
   /**
-   * Process end scoring for a match
+   * Process end scoring for a match with comprehensive validation
    * @param matchId Match ID
    * @param endData End input data
-   * @returns End score result
+   * @returns ActionResult with end score result
    */
   public async processEndScoring(
     matchId: string,
-    endData: EndInput
-  ): Promise<EndScoreResult> {
-    // Set active scoring session
-    this.state.activeScoringSession = {
-      matchId,
-      startTime: new Date().toISOString(),
-      endCount: endData.endNumber,
-      configuration: this.config
+    endData: unknown
+  ): Promise<ActionResult<EndScoreResult>> {
+    try {
+      // Validate inputs with Zod schemas
+      if (!matchId || typeof matchId !== 'string') {
+        return {
+          success: false,
+          error: 'Valid match ID is required'
+        }
+      }
+
+      const validatedEndData = validateEndInput(endData)
+
+      // Calculate boule distances first
+      const boulesWithDistances: Boule[] = validatedEndData.boules.map(boule => ({
+        ...boule,
+        distance: GeometryUtils.calculateDistance(boule.position, validatedEndData.jackPosition)
+      }))
+
+      // Extract team IDs from boules
+      const teamIds = [...new Set(boulesWithDistances.map(b => b.teamId))]
+
+      // Validate end configuration
+      const validation = validateEndConfiguration(
+        boulesWithDistances, 
+        validatedEndData.jackPosition, 
+        teamIds
+      )
+
+      if (!validation.valid) {
+        return {
+          success: false,
+          error: `Invalid end configuration: ${validation.errors.join(', ')}`,
+          fieldErrors: validation.errors.reduce((acc, error, index) => {
+            acc[`validation_${index}`] = [error]
+            return acc
+          }, {} as Record<string, string[]>)
+        }
+      }
+
+      // Calculate end score
+      const scoreResult = this.calculateEndScore(
+        boulesWithDistances,
+        validatedEndData.jackPosition,
+        teamIds
+      )
+
+      if (!scoreResult.success) {
+        return scoreResult
+      }
+
+      if (this.options.debugMode) {
+        console.log('ScoringEngine.processEndScoring:', {
+          matchId,
+          endNumber: validatedEndData.endNumber,
+          result: scoreResult.data
+        })
+      }
+
+      return scoreResult
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        return {
+          success: false,
+          error: error.message,
+          fieldErrors: error.fieldErrors
+        }
+      }
+
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'End scoring processing failed'
+      }
     }
-
-    // Calculate boule distances first
-    const boulesWithDistances: Boule[] = endData.boules.map(boule => ({
-      ...boule,
-      distance: GeometryUtils.calculateDistance(boule.position, endData.jackPosition)
-    }))
-
-    // Extract team IDs from boules
-    const teamIds = [...new Set(boulesWithDistances.map(b => b.teamId))]
-
-    // Validate end configuration
-    const validation = validateEndConfiguration(
-      boulesWithDistances, 
-      endData.jackPosition, 
-      teamIds
-    )
-
-    if (!validation.valid) {
-      throw new Error(`Invalid end configuration: ${validation.errors.join(', ')}`)
-    }
-
-    // Calculate end score
-    const result = this.calculateEndScore(
-      boulesWithDistances,
-      endData.jackPosition,
-      teamIds
-    )
-
-    if (this.options.debugMode) {
-      console.log('ScoringEngine.processEndScoring:', {
-        matchId,
-        endNumber: endData.endNumber,
-        result
-      })
-    }
-
-    return result
   }
 
   /**
@@ -266,36 +401,65 @@ export class ScoringEngine {
   }
 
   /**
-   * Calculate team statistics
+   * Calculate team statistics with proper caching and type safety
    * @param teamId Team ID
    * @param matches Array of matches
    * @param options Statistics options
-   * @returns Team statistics
+   * @returns ActionResult with team statistics
    */
   public calculateTeamStatistics(
     teamId: string,
     matches: Match[],
     options?: Partial<StatisticsOptions>
-  ): TeamStatistics {
-    const cacheKey = `team-${teamId}-${matches.length}`
-    
-    if (this.state.statisticsCache.has(cacheKey)) {
-      return this.state.statisticsCache.get(cacheKey)! as TeamStatistics
-    }
+  ): ActionResult<TeamStatistics> {
+    try {
+      // Validate inputs
+      if (!teamId || typeof teamId !== 'string') {
+        return {
+          success: false,
+          error: 'Valid team ID is required'
+        }
+      }
 
-    const statisticsOptions: StatisticsOptions = {
-      includeIncompleteMatches: false,
-      weightRecentMatches: true,
-      minimumMatchesRequired: 1,
-      calculationPrecision: 2,
-      ...options
-    }
+      if (!Array.isArray(matches)) {
+        return {
+          success: false,
+          error: 'Valid matches array is required'
+        }
+      }
 
-    const stats = calculateTeamStatistics(teamId, matches, statisticsOptions)
-    
-    this.state.statisticsCache.set(cacheKey, stats)
-    
-    return stats
+      const cacheKey = `team-${teamId}-${matches.length}-${Date.now()}`
+      const statisticsCache = this.cacheManager.getCache<TeamStatistics>('statistics')
+      
+      // Check cache with proper type safety
+      const cached = statisticsCache.get(cacheKey)
+      if (cached !== null && isTeamStatistics(cached)) {
+        return { success: true, data: cached }
+      }
+
+      const statisticsOptions: StatisticsOptions = {
+        includeIncompleteMatches: false,
+        weightRecentMatches: true,
+        minimumMatchesRequired: 1,
+        calculationPrecision: 2,
+        ...options
+      }
+
+      const stats = calculateTeamStatistics(teamId, matches, statisticsOptions)
+      
+      // Validate calculated statistics before caching
+      const validatedStats = validateTeamStatistics(stats)
+      
+      // Cache result safely
+      statisticsCache.set(cacheKey, validatedStats)
+      
+      return { success: true, data: validatedStats }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Team statistics calculation failed'
+      }
+    }
   }
 
   /**
@@ -350,14 +514,27 @@ export class ScoringEngine {
   }
 
   /**
-   * Update scoring configuration
+   * Update scoring configuration with validation
    * @param newConfig Partial configuration to update
+   * @returns ActionResult indicating success or failure
    */
-  public updateConfiguration(newConfig: Partial<ScoringConfiguration>): void {
-    this.config = { ...this.config, ...newConfig }
-    
-    if (this.options.debugMode) {
-      console.log('ScoringEngine configuration updated:', this.config)
+  public updateConfiguration(newConfig: Partial<ScoringConfiguration>): ActionResult<ScoringConfiguration> {
+    try {
+      const updatedConfig = { ...this.config, ...newConfig }
+      const validatedConfig = validateScoringConfiguration(updatedConfig)
+      
+      this.config = validatedConfig
+      
+      if (this.options.debugMode) {
+        console.log('ScoringEngine configuration updated:', this.config)
+      }
+
+      return { success: true, data: this.config }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update configuration'
+      }
     }
   }
 
@@ -378,44 +555,66 @@ export class ScoringEngine {
   }
 
   /**
-   * Clear all caches
+   * Clear all caches safely
    */
   public clearCaches(): void {
-    this.state.validationCache.clear()
-    this.state.statisticsCache.clear()
-    
-    if (this.options.debugMode) {
-      console.log('ScoringEngine caches cleared')
+    try {
+      this.cacheManager.clearAll()
+      
+      if (this.options.debugMode) {
+        console.log('ScoringEngine caches cleared')
+      }
+    } catch (error) {
+      console.warn('Failed to clear caches:', error)
     }
   }
 
   /**
-   * Get current engine state
+   * Get current engine state with cache metrics
    * @returns Current state information
    */
-  public getState(): Readonly<ScoringEngineState> {
+  public getState(): {
+    config: ScoringConfiguration
+    options: ScoringEngineOptions
+    cacheMetrics: Record<string, any>
+    memoryUsage: number
+  } {
     return {
-      ...this.state,
-      validationCache: new Map(this.state.validationCache),
-      statisticsCache: new Map(this.state.statisticsCache)
+      config: { ...this.config },
+      options: { ...this.options },
+      cacheMetrics: this.cacheManager.getAllMetrics(),
+      memoryUsage: this.cacheManager.getTotalMemoryUsage()
     }
   }
 
   /**
-   * Get engine performance metrics
+   * Get comprehensive engine performance metrics
    * @returns Performance metrics
    */
   public getPerformanceMetrics(): {
-    cacheHitRate: number
-    validationCacheSize: number
-    statisticsCacheSize: number
-    activeSessions: number
+    cacheMetrics: Record<string, any>
+    totalMemoryUsage: number
+    cacheNames: string[]
+    overallHitRate: number
   } {
+    const allMetrics = this.cacheManager.getAllMetrics()
+    
+    // Calculate overall hit rate across all caches
+    let totalHits = 0
+    let totalRequests = 0
+    
+    Object.values(allMetrics).forEach(metrics => {
+      totalHits += metrics.hits
+      totalRequests += metrics.hits + metrics.misses
+    })
+    
+    const overallHitRate = totalRequests > 0 ? (totalHits / totalRequests) * 100 : 0
+    
     return {
-      cacheHitRate: 0, // Would need to track hit/miss ratio
-      validationCacheSize: this.state.validationCache.size,
-      statisticsCacheSize: this.state.statisticsCache.size,
-      activeSessions: this.state.activeScoringSession ? 1 : 0
+      cacheMetrics: allMetrics,
+      totalMemoryUsage: this.cacheManager.getTotalMemoryUsage(),
+      cacheNames: this.cacheManager.getCacheNames(),
+      overallHitRate
     }
   }
 
@@ -435,38 +634,61 @@ export class ScoringEngine {
 
   /**
    * Validate engine setup and configuration
-   * @returns Validation result
+   * @returns ActionResult with validation details
    */
-  public validateSetup(): {
+  public validateSetup(): ActionResult<{
     valid: boolean
     issues: string[]
     recommendations: string[]
-  } {
-    const issues: string[] = []
-    const recommendations: string[] = []
+    cacheHealth: boolean
+    memoryUsage: number
+  }> {
+    try {
+      const issues: string[] = []
+      const recommendations: string[] = []
 
-    // Validate configuration
-    if (this.config.maxPoints !== PETANQUE_RULES.MAX_GAME_POINTS) {
-      issues.push('Non-standard maximum points configuration')
-    }
+      // Validate configuration
+      if (this.config.maxPoints !== PETANQUE_RULES.MAX_GAME_POINTS) {
+        issues.push('Non-standard maximum points configuration')
+      }
 
-    if (this.config.measurementPrecision < 0.1) {
-      recommendations.push('Very high precision may impact performance')
-    }
+      if (this.config.measurementPrecision < 0.1) {
+        recommendations.push('Very high precision may impact performance')
+      }
 
-    // Validate options
-    if (this.options.confidenceThreshold < 0.5) {
-      recommendations.push('Low confidence threshold may accept unreliable calculations')
-    }
+      // Validate options
+      if (this.options.confidenceThreshold < 0.5) {
+        recommendations.push('Low confidence threshold may accept unreliable calculations')
+      }
 
-    if (this.options.measurementThreshold < 1) {
-      recommendations.push('Very low measurement threshold may require frequent physical measurements')
-    }
+      if (this.options.measurementThreshold < 1) {
+        recommendations.push('Very low measurement threshold may require frequent physical measurements')
+      }
 
-    return {
-      valid: issues.length === 0,
-      issues,
-      recommendations
+      // Check cache health
+      const memoryUsage = this.cacheManager.getTotalMemoryUsage()
+      const cacheHealth = memoryUsage < 100 // MB limit
+      
+      if (!cacheHealth) {
+        issues.push('Cache memory usage is high')
+        recommendations.push('Consider clearing caches or reducing cache sizes')
+      }
+
+      return {
+        success: true,
+        data: {
+          valid: issues.length === 0,
+          issues,
+          recommendations,
+          cacheHealth,
+          memoryUsage
+        }
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to validate engine setup'
+      }
     }
   }
 }

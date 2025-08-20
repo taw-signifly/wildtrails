@@ -9,10 +9,79 @@ export { ScoringEngine, defaultScoringEngine, createScoringEngine } from './engi
 
 // Core calculation modules
 export { calculateEndScore, validateEndConfiguration, EndCalculator } from './calculator'
-export { GeometryUtils, COURT_CONSTANTS } from './geometry'
+export { 
+  GeometryUtils, 
+  COURT_CONSTANTS, 
+  clearGeometryCache, 
+  getGeometryMetrics, 
+  warmupGeometryCache 
+} from './geometry'
 export { StatisticsEngine } from './statistics'
 export { AdvancedValidation } from './validation'
 export { PetanqueRules, PETANQUE_RULES, GAME_FORMAT_RULES } from './rules'
+
+// New validation schemas and error handling
+export {
+  validateEndInput,
+  validateScoringConfiguration,
+  validateScoringEngineOptions,
+  validateTeamStatistics,
+  safeParseEndInput,
+  safeParseScoringConfiguration,
+  EndInputSchema,
+  ScoringConfigurationSchema,
+  ScoringEngineOptionsSchema,
+  TeamStatisticsSchema,
+  ScoreSchema,
+  BouleSchema,
+  PositionSchema
+} from './schemas'
+
+export {
+  ScoringError,
+  ValidationError,
+  CalculationError,
+  GeometryError,
+  RuleViolationError,
+  CacheError,
+  ConfigurationError,
+  PerformanceError,
+  EngineStateError,
+  ErrorAggregator,
+  createValidationError,
+  createCalculationError,
+  createGeometryError,
+  createRuleViolationError,
+  createCacheError,
+  createConfigurationError,
+  createPerformanceError,
+  isRecoverableError,
+  getErrorSeverity,
+  getErrorContext,
+  logScoringError
+} from './errors'
+
+export {
+  AdvancedCache,
+  CacheManager,
+  defaultCacheManager,
+  isCacheEntry,
+  isValidCacheKey
+} from './cache'
+
+// Server Actions for Next.js integration
+export {
+  processEndScoringAction,
+  processEndScoringDataAction,
+  validateMatchScoreAction,
+  calculateTeamStatisticsAction,
+  calculateTournamentStatisticsAction,
+  calculateEndScoreAction,
+  getScoringEngineMetricsAction,
+  clearScoringCachesAction,
+  createScoringEngineAction,
+  warmupScoringEngineAction
+} from '../actions/scoring'
 
 // Import types and functions for internal use
 import type {
@@ -65,6 +134,28 @@ export type {
   ScoringEvent,
   ScoringEngineState
 }
+
+// New validated types
+export type {
+  ValidatedEndInput,
+  ValidatedScoringConfiguration,
+  ValidatedScoringEngineOptions,
+  ValidatedTeamStatistics,
+  ValidatedCacheEntry,
+  ValidatedScoringError
+} from './schemas'
+
+// Cache types
+export type {
+  CacheEntry,
+  CacheConfig,
+  CacheMetrics
+} from './cache'
+
+// Error context types
+export type {
+  ScoringErrorContext
+} from './errors'
 
 // Utility functions for common tasks
 export {
