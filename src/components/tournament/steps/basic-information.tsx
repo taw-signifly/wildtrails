@@ -21,6 +21,20 @@ export function BasicInformation() {
     }
   }, [setupData.basic])
 
+  // Initialize startDate with default value if not set
+  useEffect(() => {
+    if (!formData.startDate) {
+      const defaultDate = new Date()
+      defaultDate.setDate(defaultDate.getDate() + 1)
+      defaultDate.setHours(9, 0, 0, 0)
+      const defaultDateString = defaultDate.toISOString()
+      
+      const newData = { ...formData, startDate: defaultDateString }
+      setFormData(newData)
+      updateStepData('basic', newData)
+    }
+  }, [formData.startDate, updateStepData, formData])
+
   const handleInputChange = (field: keyof BasicInformationType, value: string) => {
     const newData = { ...formData, [field]: value }
     setFormData(newData)
