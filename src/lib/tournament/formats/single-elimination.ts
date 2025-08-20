@@ -1,4 +1,5 @@
-import { Tournament, Team, Match, BracketNode, TournamentType } from '@/types'
+import { Tournament, Team, Match, TournamentType } from '@/types'
+import type { BracketNode } from '@/lib/actions/bracket-management'
 import { BaseFormatHandler } from './base'
 import { 
   BracketResult, 
@@ -228,7 +229,6 @@ export class SingleEliminationHandler extends BaseFormatHandler {
 
   private generateBracketStructure(bracketSize: number, totalRounds: number): BracketNode[] {
     const nodes: BracketNode[] = []
-    let nodeId = 1
 
     for (let round = 1; round <= totalRounds; round++) {
       const matchesInRound = bracketSize / Math.pow(2, round)

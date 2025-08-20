@@ -1,4 +1,5 @@
-import { Tournament, Team, Match, BracketNode } from '@/types'
+import { Tournament, Team, Match } from '@/types'
+import type { BracketNode } from '@/lib/actions/bracket-management'
 
 export interface SeedingOptions {
   method: 'ranked' | 'random' | 'club-balanced' | 'geographic' | 'skill-balanced'

@@ -103,6 +103,7 @@ export interface Team {
   seed?: number
   bracketType: BracketType
   stats: TeamStats
+  isBye?: boolean
   createdAt: string
   updatedAt: string
 }

@@ -1,4 +1,5 @@
-import { Tournament, Team, Match, BracketNode, TournamentType } from '@/types'
+import { Tournament, Team, Match, TournamentType } from '@/types'
+import type { BracketNode } from '@/lib/actions/bracket-management'
 import { BaseFormatHandler } from './base'
 import { 
   BracketResult, 
@@ -365,9 +366,10 @@ export class SwissSystemHandler extends BaseFormatHandler {
     // Handle odd number of teams
     if (sortedTeams.length % 2 === 1) {
       // Give bye to lowest-ranked team who hasn't had one
-      byeTeam = this.findByeCandidate(sortedTeams, previousMatches)
-      if (byeTeam) {
-        paired.add(byeTeam.team.id)
+      const byeCandidate = this.findByeCandidate(sortedTeams, previousMatches)
+      if (byeCandidate) {
+        byeTeam = byeCandidate.team
+        paired.add(byeCandidate.team.id)
       }
     }
 

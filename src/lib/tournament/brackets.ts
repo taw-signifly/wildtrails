@@ -20,12 +20,11 @@ export class BracketGenerator {
 
   constructor() {
     this.seeder = new Seeder()
-    this.formatHandlers = new Map([
-      ['single-elimination', new SingleEliminationHandler()],
-      ['round-robin', new RoundRobinHandler()],
-      ['swiss', new SwissSystemHandler()],
-      ['barrage', new BarrageHandler()]
-    ])
+    this.formatHandlers = new Map<TournamentType, BaseFormatHandler>()
+    this.formatHandlers.set('single-elimination', new SingleEliminationHandler())
+    this.formatHandlers.set('round-robin', new RoundRobinHandler())
+    this.formatHandlers.set('swiss', new SwissSystemHandler())
+    this.formatHandlers.set('barrage', new BarrageHandler())
   }
 
   /**
