@@ -1,361 +1,403 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { Tournament } from '@/types'
+import { useTournamentStore, useCurrentTournament } from '@/stores/tournament-store'
 import { createClientComponentClient } from '@/lib/db/supabase'
-import type { RealtimeChannel } from '@supabase/supabase-js'
 
 export interface PresenceUser {
   userId: string
-  name: string
+  displayName: string
   role: 'player' | 'official' | 'spectator' | 'organizer'
-  avatar?: string
   joinedAt: string
   lastSeen: string
+  isActive: boolean
 }
 
 export interface TournamentPresenceState {
   activeUsers: PresenceUser[]
   totalUsers: number
-  usersByRole: Record<string, PresenceUser[]>
-  isConnected: boolean
-  error: string | null
+  officials: PresenceUser[]
+  players: PresenceUser[]
+  spectators: PresenceUser[]
+  organizers: PresenceUser[]
+}
+
+export interface UseTournamentPresenceOptions {
+  tournamentId?: string
+  userId?: string
+  userRole?: 'player' | 'official' | 'spectator' | 'organizer'
+  displayName?: string
+  autoJoin?: boolean
+  heartbeatInterval?: number // milliseconds
+}
+
+export interface UseTournamentPresenceReturn {
+  presence: TournamentPresenceState
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error'
+  isPresent: boolean
+  
+  // Actions
+  join: (role: 'player' | 'official' | 'spectator' | 'organizer', displayName?: string) => Promise<void>
+  leave: () => void
+  updateRole: (role: 'player' | 'official' | 'spectator' | 'organizer') => void
+  sendHeartbeat: () => void
 }
 
-export interface TournamentPresenceActions {
-  connect: (userInfo: Omit<PresenceUser, 'joinedAt' | 'lastSeen'>) => void
-  disconnect: () => void
-  updateUserRole: (role: PresenceUser['role']) => void
-  broadcastUserAction: (action: string, data?: any) => void
-}
-
-export type UseTournamentPresenceReturn = TournamentPresenceState & TournamentPresenceActions
-
-/**
- * Hook for tracking active users in a tournament using Supabase Presence
- * Provides real-time user tracking, role management, and user interaction broadcasting
- */
 export function useTournamentPresence(
-  tournamentId: string | null,
-  options: {
-    autoConnect?: boolean
-    updateInterval?: number
-    onUserJoin?: (user: PresenceUser) => void
-    onUserLeave?: (user: PresenceUser) => void
-    onUserUpdate?: (user: PresenceUser) => void
-  } = {}
+  options: UseTournamentPresenceOptions = {}
 ): UseTournamentPresenceReturn {
   const {
-    autoConnect = false,
-    updateInterval = 30000, // 30 seconds
-    onUserJoin,
-    onUserLeave,
-    onUserUpdate
+    tournamentId: propTournamentId,
+    userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    userRole = 'spectator',
+    displayName = 'Anonymous User',
+    autoJoin = true,
+    heartbeatInterval = 30000 // 30 seconds
   } = options
-
-  const [state, setState] = useState<TournamentPresenceState>({
+  
+  const currentTournament = useCurrentTournament()
+  const tournamentId = propTournamentId || currentTournament?.id
+  
+  const [presence, setPresence] = useState<TournamentPresenceState>({
     activeUsers: [],
     totalUsers: 0,
-    usersByRole: {
-      player: [],
-      official: [],
-      spectator: [],
-      organizer: []
-    },
-    isConnected: false,
-    error: null,
-    connectionStatus: 'disconnected'
+    officials: [],
+    players: [],
+    spectators: [],
+    organizers: []
   })
-
-  const supabase = createClientComponentClient()
-  const channelRef = useRef<RealtimeChannel | null>(null)
-  const userInfoRef = useRef<Omit<PresenceUser, 'joinedAt' | 'lastSeen'> | null>(null)
-  const heartbeatRef = useRef<NodeJS.Timeout>()
-
-  const setError = useCallback((error: string | null) => {
-    setState(prev => ({ 
-      ...prev, 
-      error,
-      connectionStatus: error ? 'error' : prev.connectionStatus
-    }))
-  }, [])
-
-  const setConnectionStatus = useCallback((status: TournamentPresenceState['connectionStatus']) => {
-    setState(prev => ({ 
-      ...prev, 
-      connectionStatus: status,
-      isConnected: status === 'connected'
-    }))
-  }, [])
-
-  // Process presence state and update local state
-  const processPresenceState = useCallback((presenceState: Record<string, any[]>) => {
-    const activeUsers: PresenceUser[] = []
-    const usersByRole: Record<string, PresenceUser[]> = {
-      player: [],
-      official: [],
-      spectator: [],
-      organizer: []
-    }
-
-    Object.values(presenceState).forEach(presences => {
-      presences.forEach(presence => {
-        const user: PresenceUser = {
-          userId: presence.userId,
-          name: presence.name,
-          role: presence.role,
-          avatar: presence.avatar,
-          joinedAt: presence.joinedAt,
-          lastSeen: presence.lastSeen || new Date().toISOString()
-        }
-        
-        activeUsers.push(user)
-        if (usersByRole[user.role]) {
-          usersByRole[user.role].push(user)
-        }
-      })
-    })
-
-    // Sort users by join time (most recent first)
-    activeUsers.sort((a, b) => new Date(b.joinedAt).getTime() - new Date(a.joinedAt).getTime())
-
-    setState(prev => ({
-      ...prev,
-      activeUsers,
-      totalUsers: activeUsers.length,
-      usersByRole
-    }))
-  }, [])
-
-  // Connect to tournament presence
-  const connect = useCallback((userInfo: Omit<PresenceUser, 'joinedAt' | 'lastSeen'>) => {
-    if (!tournamentId || channelRef.current) return
-
-    userInfoRef.current = userInfo
-    setConnectionStatus('connecting')
-    setError(null)
-
-    const channel = supabase
-      .channel(`tournament_presence_${tournamentId}`, {
-        config: { presence: { key: userInfo.userId } }
-      })
-      .on('presence', { event: 'sync' }, () => {
-        const presenceState = channel.presenceState()
-        processPresenceState(presenceState)
-      })
-      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
-        const newUser = newPresences[0] as PresenceUser
-        onUserJoin?.(newUser)
-        
-        const presenceState = channel.presenceState()
-        processPresenceState(presenceState)
-      })
-      .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-        const leftUser = leftPresences[0] as PresenceUser
-        onUserLeave?.(leftUser)
-        
-        const presenceState = channel.presenceState()
-        processPresenceState(presenceState)
-      })
-      .on('broadcast', { event: 'user_action' }, ({ payload }) => {
-        console.log('User action:', payload)
-      })
-      .subscribe(async (status, error) => {
-        if (error) {
-          setError(`Presence subscription error: ${error.message}`)
-          setConnectionStatus('error')
-          return
-        }
-
-        switch (status) {
-          case 'SUBSCRIBED':
-            // Track presence with user info
-            const presenceData = {
-              ...userInfo,
-              joinedAt: new Date().toISOString(),
-              lastSeen: new Date().toISOString()
-            }
-
-            await channel.track(presenceData)
-            setConnectionStatus('connected')
-
-            // Set up heartbeat to update lastSeen
-            heartbeatRef.current = setInterval(async () => {
-              await channel.track({
-                ...presenceData,
-                lastSeen: new Date().toISOString()
-              })
-            }, updateInterval)
-            break
-
-          case 'CHANNEL_ERROR':
-            setError('Presence channel error')
-            setConnectionStatus('error')
-            break
-
-          case 'TIMED_OUT':
-            setError('Presence connection timed out')
-            setConnectionStatus('error')
-            break
-
-          case 'CLOSED':
-            setConnectionStatus('disconnected')
-            break
-        }
-      })
-
-    channelRef.current = channel
-  }, [tournamentId, supabase, processPresenceState, onUserJoin, onUserLeave, updateInterval, setConnectionStatus, setError])
-
-  // Disconnect from presence
-  const disconnect = useCallback(async () => {
-    if (channelRef.current) {
-      await channelRef.current.untrack()
-      supabase.removeChannel(channelRef.current)
-      channelRef.current = null
-    }
-
-    if (heartbeatRef.current) {
-      clearInterval(heartbeatRef.current)
-      heartbeatRef.current = undefined
-    }
-
-    setConnectionStatus('disconnected')
-    setState(prev => ({
-      ...prev,
-      activeUsers: [],
-      totalUsers: 0,
-      usersByRole: {
-        player: [],
-        official: [],
-        spectator: [],
-        organizer: []
+  
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected')
+  const [isPresent, setIsPresent] = useState(false)
+  
+  const supabaseRef = useRef(createClientComponentClient())
+  const channelRef = useRef<any>(null)
+  const heartbeatRef = useRef<NodeJS.Timeout | null>(null)
+  const userRef = useRef({ userId, role: userRole, displayName })
+  
+  // Update user ref when props change
+  useEffect(() => {
+    userRef.current = { userId, role: userRole, displayName }
+  }, [userId, userRole, displayName])
+  
+  // Process presence state from raw presence data
+  const processPresenceState = (presenceState: any): TournamentPresenceState => {
+    const users: PresenceUser[] = []
+    
+    // Extract users from presence state
+    Object.keys(presenceState).forEach(key => {
+      const presence = presenceState[key]
+      if (presence && presence.length > 0) {
+        const user = presence[0] // Take the latest presence entry
+        users.push({
+          userId: user.userId || key,
+          displayName: user.displayName || 'Unknown User',
+          role: user.role || 'spectator',
+          joinedAt: user.joinedAt || new Date().toISOString(),
+          lastSeen: user.lastSeen || new Date().toISOString(),
+          isActive: true
+        })
       }
-    }))
-  }, [supabase, setConnectionStatus])
-
-  // Update user role
-  const updateUserRole = useCallback(async (role: PresenceUser['role']) => {
-    if (!channelRef.current || !userInfoRef.current) return
-
-    const updatedUserInfo = {
-      ...userInfoRef.current,
+    })
+    
+    // Sort by join time
+    users.sort((a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime())
+    
+    return {
+      activeUsers: users,
+      totalUsers: users.length,
+      officials: users.filter(u => u.role === 'official'),
+      players: users.filter(u => u.role === 'player'),
+      spectators: users.filter(u => u.role === 'spectator'),
+      organizers: users.filter(u => u.role === 'organizer')
+    }
+  }
+  
+  // Join tournament presence
+  const join = async (role: 'player' | 'official' | 'spectator' | 'organizer', name?: string) => {
+    if (!tournamentId || channelRef.current) return
+    
+    setConnectionStatus('connecting')
+    
+    const userData = {
+      userId: userRef.current.userId,
       role,
+      displayName: name || userRef.current.displayName,
+      joinedAt: new Date().toISOString(),
       lastSeen: new Date().toISOString()
     }
-
-    userInfoRef.current = { ...userInfoRef.current, role }
-
-    await channelRef.current.track({
-      ...updatedUserInfo,
-      joinedAt: userInfoRef.current.joinedAt || new Date().toISOString()
-    })
-
-    onUserUpdate?.(updatedUserInfo as PresenceUser)
-  }, [onUserUpdate])
-
-  // Broadcast user action
-  const broadcastUserAction = useCallback((action: string, data?: any) => {
-    if (!channelRef.current || !userInfoRef.current) return
-
-    channelRef.current.send({
-      type: 'broadcast',
-      event: 'user_action',
-      payload: {
-        userId: userInfoRef.current.userId,
-        action,
-        data,
-        timestamp: new Date().toISOString()
+    
+    try {
+      channelRef.current = supabaseRef.current
+        .channel(`tournament_${tournamentId}_presence`)
+        .on('presence', { event: 'sync' }, () => {
+          const presenceState = channelRef.current?.presenceState()
+          if (presenceState) {
+            const processedState = processPresenceState(presenceState)
+            setPresence(processedState)
+            
+            // Check if current user is present
+            setIsPresent(processedState.activeUsers.some(u => u.userId === userRef.current.userId))
+          }
+          setConnectionStatus('connected')
+        })
+        .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+          const presenceState = channelRef.current?.presenceState()
+          if (presenceState) {
+            setPresence(processPresenceState(presenceState))
+          }
+        })
+        .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+          const presenceState = channelRef.current?.presenceState()
+          if (presenceState) {
+            setPresence(processPresenceState(presenceState))
+          }
+          
+          // Check if current user left
+          if (leftPresences.some((p: any) => p.userId === userRef.current.userId)) {
+            setIsPresent(false)
+          }
+        })
+        .subscribe(async (status: string) => {
+          if (status === 'SUBSCRIBED') {
+            // Track this user's presence
+            await channelRef.current?.track(userData)
+            setIsPresent(true)
+            setConnectionStatus('connected')
+            
+            // Start heartbeat
+            startHeartbeat()
+          } else if (status === 'CLOSED') {
+            setConnectionStatus('disconnected')
+            setIsPresent(false)
+            stopHeartbeat()
+          } else if (status === 'CHANNEL_ERROR') {
+            setConnectionStatus('error')
+            setIsPresent(false)
+            stopHeartbeat()
+          }
+        })
+    } catch (error) {
+      console.error('Failed to join tournament presence:', error)
+      setConnectionStatus('error')
+    }
+  }
+  
+  // Leave tournament presence
+  const leave = () => {
+    if (channelRef.current) {
+      channelRef.current.untrack()
+      supabaseRef.current.removeChannel(channelRef.current)
+      channelRef.current = null
+    }
+    
+    setConnectionStatus('disconnected')
+    setIsPresent(false)
+    stopHeartbeat()
+  }
+  
+  // Update user role
+  const updateRole = (role: 'player' | 'official' | 'spectator' | 'organizer') => {
+    if (channelRef.current && isPresent) {
+      const userData = {
+        userId: userRef.current.userId,
+        role,
+        displayName: userRef.current.displayName,
+        joinedAt: new Date().toISOString(),
+        lastSeen: new Date().toISOString()
       }
-    })
+      
+      channelRef.current.track(userData)
+    }
+  }
+  
+  // Send heartbeat to maintain presence
+  const sendHeartbeat = () => {
+    if (channelRef.current && isPresent) {
+      const userData = {
+        userId: userRef.current.userId,
+        role: userRef.current.role,
+        displayName: userRef.current.displayName,
+        joinedAt: new Date().toISOString(),
+        lastSeen: new Date().toISOString()
+      }
+      
+      channelRef.current.track(userData)
+    }
+  }
+  
+  // Start heartbeat timer
+  const startHeartbeat = () => {
+    if (heartbeatRef.current) return
+    
+    heartbeatRef.current = setInterval(() => {
+      sendHeartbeat()
+    }, heartbeatInterval)
+  }
+  
+  // Stop heartbeat timer
+  const stopHeartbeat = () => {
+    if (heartbeatRef.current) {
+      clearInterval(heartbeatRef.current)
+      heartbeatRef.current = null
+    }
+  }
+  
+  // Auto-join effect
+  useEffect(() => {
+    if (tournamentId && autoJoin && connectionStatus === 'disconnected') {
+      join(userRole, displayName)
+    }
+    
+    return () => {
+      if (!autoJoin) {
+        leave()
+      }
+    }
+  }, [tournamentId, autoJoin])
+  
+  // Cleanup effect
+  useEffect(() => {
+    return () => {
+      leave()
+    }
   }, [])
-
-  // Auto-connect if enabled
+  
+  // Handle page visibility changes
   useEffect(() => {
-    if (autoConnect && tournamentId && userInfoRef.current) {
-      connect(userInfoRef.current)
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // User switched tabs/minimized - maintain presence but reduce heartbeat
+        stopHeartbeat()
+      } else {
+        // User is back - resume normal heartbeat
+        if (isPresent) {
+          sendHeartbeat()
+          startHeartbeat()
+        }
+      }
     }
-
+    
+    const handleBeforeUnload = () => {
+      // Clean leave when user closes/refreshes page
+      if (channelRef.current) {
+        channelRef.current.untrack()
+      }
+    }
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    
     return () => {
-      disconnect()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
     }
-  }, [tournamentId, autoConnect, connect, disconnect])
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      disconnect()
-    }
-  }, [disconnect])
-
+  }, [isPresent])
+  
   return {
-    ...state,
-    connect,
-    disconnect,
-    updateUserRole,
-    broadcastUserAction
+    presence,
+    connectionStatus,
+    isPresent,
+    join,
+    leave,
+    updateRole,
+    sendHeartbeat
   }
 }
 
-/**
- * Simplified hook for just tracking user count without full presence features
- */
-export function useTournamentUserCount(tournamentId: string | null): {
-  totalUsers: number
-  usersByRole: Record<string, number>
-  isConnected: boolean
-} {
-  const { totalUsers, usersByRole, isConnected } = useTournamentPresence(tournamentId, {
-    autoConnect: false
+// Hook for simple presence display without joining
+export function useTournamentPresenceDisplay(tournamentId: string | null) {
+  const [presence, setPresence] = useState<TournamentPresenceState>({
+    activeUsers: [],
+    totalUsers: 0,
+    officials: [],
+    players: [],
+    spectators: [],
+    organizers: []
   })
-
-  const userCountsByRole = Object.entries(usersByRole).reduce((acc, [role, users]) => {
-    acc[role] = users.length
-    return acc
-  }, {} as Record<string, number>)
-
-  return {
-    totalUsers,
-    usersByRole: userCountsByRole,
-    isConnected
-  }
-}
-
-/**
- * Hook for officials/organizers with enhanced presence features
- */
-export function useOfficialPresence(
-  tournamentId: string | null,
-  officialInfo: Omit<PresenceUser, 'joinedAt' | 'lastSeen' | 'role'>
-) {
-  const presenceReturn = useTournamentPresence(tournamentId, {
-    autoConnect: true,
-    onUserJoin: (user) => {
-      if (user.role === 'official' || user.role === 'organizer') {
-        console.log('Official joined:', user.name)
+  
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected')
+  
+  const supabaseRef = useRef(createClientComponentClient())
+  const channelRef = useRef<any>(null)
+  
+  // Process presence state from raw presence data
+  const processPresenceState = (presenceState: any): TournamentPresenceState => {
+    const users: PresenceUser[] = []
+    
+    Object.keys(presenceState).forEach(key => {
+      const presence = presenceState[key]
+      if (presence && presence.length > 0) {
+        const user = presence[0]
+        users.push({
+          userId: user.userId || key,
+          displayName: user.displayName || 'Unknown User',
+          role: user.role || 'spectator',
+          joinedAt: user.joinedAt || new Date().toISOString(),
+          lastSeen: user.lastSeen || new Date().toISOString(),
+          isActive: true
+        })
       }
-    },
-    onUserLeave: (user) => {
-      if (user.role === 'official' || user.role === 'organizer') {
-        console.log('Official left:', user.name)
-      }
+    })
+    
+    users.sort((a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime())
+    
+    return {
+      activeUsers: users,
+      totalUsers: users.length,
+      officials: users.filter(u => u.role === 'official'),
+      players: users.filter(u => u.role === 'player'),
+      spectators: users.filter(u => u.role === 'spectator'),
+      organizers: users.filter(u => u.role === 'organizer')
     }
-  })
-
+  }
+  
   useEffect(() => {
-    if (tournamentId) {
-      presenceReturn.connect({
-        ...officialInfo,
-        role: 'official'
+    if (!tournamentId) return
+    
+    setConnectionStatus('connecting')
+    
+    channelRef.current = supabaseRef.current
+      .channel(`tournament_${tournamentId}_presence`)
+      .on('presence', { event: 'sync' }, () => {
+        const presenceState = channelRef.current?.presenceState()
+        if (presenceState) {
+          setPresence(processPresenceState(presenceState))
+        }
+        setConnectionStatus('connected')
       })
+      .on('presence', { event: 'join' }, () => {
+        const presenceState = channelRef.current?.presenceState()
+        if (presenceState) {
+          setPresence(processPresenceState(presenceState))
+        }
+      })
+      .on('presence', { event: 'leave' }, () => {
+        const presenceState = channelRef.current?.presenceState()
+        if (presenceState) {
+          setPresence(processPresenceState(presenceState))
+        }
+      })
+      .subscribe((status: string) => {
+        if (status === 'SUBSCRIBED') {
+          setConnectionStatus('connected')
+        } else if (status === 'CLOSED') {
+          setConnectionStatus('disconnected')
+        } else if (status === 'CHANNEL_ERROR') {
+          setConnectionStatus('error')
+        }
+      })
+    
+    return () => {
+      if (channelRef.current) {
+        supabaseRef.current.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
+      setConnectionStatus('disconnected')
     }
-  }, [tournamentId, officialInfo, presenceReturn])
-
-  const officials = presenceReturn.usersByRole.official || []
-  const organizers = presenceReturn.usersByRole.organizer || []
-
+  }, [tournamentId])
+  
   return {
-    ...presenceReturn,
-    officials,
-    organizers,
-    totalOfficials: officials.length + organizers.length
+    presence,
+    connectionStatus
   }
 }

@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { persist } from 'zustand/middleware'
 import { Tournament, TournamentStatus, TournamentFormData, TournamentStats } from '@/types'
-import { TournamentSupabaseDB } from '@/lib/db/tournaments-getSupabase()'
-import { createClientComponentClient } from '@/lib/db/getSupabase()'
+import { TournamentSupabaseDB } from '@/lib/db/tournaments-supabase'
+import { createClientComponentClient } from '@/lib/db/supabase'
 
 export interface TournamentFilter {
   status?: TournamentStatus[]
@@ -80,7 +80,7 @@ export type TournamentStore = TournamentStoreState & TournamentStoreActions
 
 // Lazy initialization for database and client
 let _db: TournamentSupabaseDB | null = null;
-let _getSupabase(): ReturnType<typeof createClientComponentClient> | null = null;
+let _supabase: ReturnType<typeof createClientComponentClient> | null = null;
 
 const getDB = () => {
   if (!_db) {
@@ -90,10 +90,10 @@ const getDB = () => {
 }
 
 const getSupabase = () => {
-  if (!_getSupabase()) {
-    _getSupabase() = createClientComponentClient();
+  if (!_supabase) {
+    _supabase = createClientComponentClient();
   }
-  return _getSupabase();
+  return _supabase;
 }
 
 export const useTournamentStore = create<TournamentStore>()(

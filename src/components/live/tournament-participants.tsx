@@ -1,395 +1,458 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { useTournamentPresence, useOfficialPresence } from '@/hooks/use-tournament-presence'
+import React, { useState } from 'react'
+import { useTournamentPresenceDisplay } from '@/hooks/use-tournament-presence'
+import { useActivePlayers, useCheckedInPlayers } from '@/stores/player-store'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 
 export interface TournamentParticipantsProps {
   tournamentId: string | null
-  userInfo?: {
-    userId: string
-    name: string
-    role: 'player' | 'official' | 'spectator' | 'organizer'
-    avatar?: string
-  }
-  showControls?: boolean
+  showPresence?: boolean
+  showPlayerStats?: boolean
   compact?: boolean
-  className?: string
 }
 
 export function TournamentParticipants({
   tournamentId,
-  userInfo,
-  showControls = false,
-  compact = false,
-  className = ''
+  showPresence = true,
+  showPlayerStats = true,
+  compact = false
 }: TournamentParticipantsProps) {
-  const [selectedRole, setSelectedRole] = useState<'all' | 'player' | 'official' | 'spectator' | 'organizer'>('all')
-  const [showOfflineUsers, setShowOfflineUsers] = useState(false)
-
-  const {
-    activeUsers,
-    totalUsers,
-    usersByRole,
-    isConnected,
-    error,
-    connect,
-    disconnect,
-    updateUserRole,
-    broadcastUserAction
-  } = useTournamentPresence(tournamentId, {
-    autoConnect: !!tournamentId && !!userInfo,
-    onUserJoin: (user) => {
-      console.log('User joined tournament:', user.name)
-      if (user.role === 'official' || user.role === 'organizer') {
-        broadcastUserAction('official_joined', { userName: user.name, role: user.role })
-      }
-    },
-    onUserLeave: (user) => {
-      console.log('User left tournament:', user.name)
-    }
-  })
-
-  // Connect with user info when available
-  useEffect(() => {
-    if (tournamentId && userInfo && !isConnected) {
-      connect(userInfo)
-    }
-
-    return () => {
-      if (isConnected) {
-        disconnect()
-      }
-    }
-  }, [tournamentId, userInfo, isConnected, connect, disconnect])
-
-  if (!tournamentId) {
-    return (
-      <Card className={`p-4 ${className}`}>
-        <div className="text-center text-gray-500">
-          No tournament selected
-        </div>
-      </Card>
-    )
+  const [activeTab, setActiveTab] = useState('all')
+  
+  // Get presence data
+  const { presence, connectionStatus } = useTournamentPresenceDisplay(tournamentId)
+  
+  // Get player data from store
+  const activePlayers = useActivePlayers()
+  const checkedInPlayers = useCheckedInPlayers()
+  
+  // Format time since joined
+  const getTimeSince = (timestamp: string) => {
+    const now = new Date()
+    const then = new Date(timestamp)
+    const diffMs = now.getTime() - then.getTime()
+    const diffMins = Math.floor(diffMs / (1000 * 60))
+    
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    
+    const diffHours = Math.floor(diffMins / 60)
+    if (diffHours < 24) return `${diffHours}h ago`
+    
+    const diffDays = Math.floor(diffHours / 24)
+    return `${diffDays}d ago`
   }
-
-  if (error) {
-    return (
-      <Card className={`p-4 border-red-200 bg-red-50 ${className}`}>
-        <div className="text-center text-red-600">
-          <p className="font-medium">Connection Error</p>
-          <p className="text-sm">{error}</p>
-        </div>
-      </Card>
-    )
+  
+  // Get role badge variant
+  const getRoleVariant = (role: string) => {
+    switch (role) {
+      case 'organizer': return 'default'
+      case 'official': return 'secondary'
+      case 'player': return 'outline'
+      default: return 'outline'
+    }
   }
-
+  
+  // Get role color
   const getRoleColor = (role: string) => {
     switch (role) {
-      case 'organizer': return 'bg-purple-100 text-purple-800'
-      case 'official': return 'bg-blue-100 text-blue-800'
-      case 'player': return 'bg-green-100 text-green-800'
-      case 'spectator': return 'bg-gray-100 text-gray-800'
-      default: return 'bg-gray-100 text-gray-800'
+      case 'organizer': return 'text-blue-600'
+      case 'official': return 'text-green-600'
+      case 'player': return 'text-gray-600'
+      default: return 'text-gray-400'
     }
   }
-
-  const getOnlineStatus = (lastSeen: string) => {
-    const lastSeenTime = new Date(lastSeen).getTime()
-    const now = new Date().getTime()
-    const diffMinutes = (now - lastSeenTime) / (1000 * 60)
-
-    if (diffMinutes < 1) return 'online'
-    if (diffMinutes < 5) return 'away'
-    return 'offline'
+  
+  // Get user initials
+  const getUserInitials = (displayName: string) => {
+    return displayName
+      .split(' ')
+      .map(name => name.charAt(0).toUpperCase())
+      .join('')
+      .substring(0, 2)
   }
-
-  const getStatusDot = (status: string) => {
-    switch (status) {
-      case 'online': return 'bg-green-500'
-      case 'away': return 'bg-yellow-500'
-      case 'offline': return 'bg-gray-400'
-      default: return 'bg-gray-400'
-    }
-  }
-
-  const filteredUsers = selectedRole === 'all' 
-    ? activeUsers
-    : activeUsers.filter(user => user.role === selectedRole)
-
-  const visibleUsers = showOfflineUsers 
-    ? filteredUsers
-    : filteredUsers.filter(user => getOnlineStatus(user.lastSeen) !== 'offline')
-
+  
   if (compact) {
     return (
-      <Card className={`p-3 ${className}`}>
+      <Card className="p-3">
         <div className="flex items-center justify-between mb-2">
-          <h4 className="font-medium">Participants</h4>
-          <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+          <h3 className="font-medium text-sm">Participants</h3>
+          {showPresence && (
+            <div className="flex items-center space-x-1 text-xs text-gray-500">
+              <div className={`w-1.5 h-1.5 rounded-full ${
+                connectionStatus === 'connected' ? 'bg-green-500' : 
+                connectionStatus === 'connecting' ? 'bg-yellow-500' : 'bg-gray-500'
+              }`}></div>
+              <span>{presence.totalUsers} online</span>
+            </div>
+          )}
         </div>
         
-        <div className="text-2xl font-bold mb-2">{totalUsers}</div>
-        
-        <div className="grid grid-cols-2 gap-1 text-xs">
-          <div>Players: {usersByRole.player?.length || 0}</div>
-          <div>Officials: {(usersByRole.official?.length || 0) + (usersByRole.organizer?.length || 0)}</div>
-          <div>Spectators: {usersByRole.spectator?.length || 0}</div>
-          <div>Online: {visibleUsers.length}</div>
+        <div className="space-y-1">
+          {showPresence && presence.activeUsers.slice(0, 5).map(user => (
+            <div key={user.userId} className="flex items-center space-x-2 text-sm">
+              <Avatar className="h-6 w-6">
+                <AvatarFallback className="text-xs">
+                  {getUserInitials(user.displayName)}
+                </AvatarFallback>
+              </Avatar>
+              <span className="flex-1 truncate">{user.displayName}</span>
+              <Badge variant={getRoleVariant(user.role)} className="text-xs py-0">
+                {user.role}
+              </Badge>
+            </div>
+          ))}
+          
+          {showPresence && presence.totalUsers > 5 && (
+            <div className="text-xs text-gray-500 text-center pt-1">
+              and {presence.totalUsers - 5} more...
+            </div>
+          )}
+          
+          {!showPresence && (
+            <div className="text-sm text-gray-500">
+              {activePlayers.length} active players
+            </div>
+          )}
         </div>
       </Card>
     )
   }
-
+  
   return (
-    <Card className={`p-6 ${className}`}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold">Tournament Participants</h3>
-        <div className="flex items-center gap-2">
-          <div className={`flex items-center gap-1 text-sm ${isConnected ? 'text-green-600' : 'text-red-600'}`}>
-            <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-            <span>{isConnected ? 'Live' : 'Disconnected'}</span>
+    <Card className="p-6">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-xl font-semibold">Tournament Participants</h2>
+        {showPresence && (
+          <div className="flex items-center space-x-2">
+            <div className={`w-2 h-2 rounded-full ${
+              connectionStatus === 'connected' ? 'bg-green-500' : 
+              connectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-gray-500'
+            }`}></div>
+            <span className="text-sm text-gray-600">
+              {connectionStatus === 'connected' ? 'Live' : 'Offline'}
+            </span>
           </div>
-        </div>
-      </div>
-
-      {/* Summary Stats */}
-      <div className="grid grid-cols-4 gap-4 mb-4">
-        <div className="text-center">
-          <div className="text-2xl font-bold text-blue-600">{totalUsers}</div>
-          <div className="text-sm text-gray-600">Total</div>
-        </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold text-green-600">{usersByRole.player?.length || 0}</div>
-          <div className="text-sm text-gray-600">Players</div>
-        </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold text-purple-600">
-            {(usersByRole.official?.length || 0) + (usersByRole.organizer?.length || 0)}
-          </div>
-          <div className="text-sm text-gray-600">Officials</div>
-        </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold text-gray-600">{usersByRole.spectator?.length || 0}</div>
-          <div className="text-sm text-gray-600">Spectators</div>
-        </div>
-      </div>
-
-      <Separator className="my-4" />
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        {['all', 'organizer', 'official', 'player', 'spectator'].map((role) => (
-          <Button
-            key={role}
-            variant={selectedRole === role ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setSelectedRole(role as any)}
-          >
-            {role.charAt(0).toUpperCase() + role.slice(1)}
-            {role === 'all' ? ` (${totalUsers})` : ` (${usersByRole[role as keyof typeof usersByRole]?.length || 0})`}
-          </Button>
-        ))}
-      </div>
-
-      {/* Toggle offline users */}
-      <div className="flex items-center gap-2 mb-4">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setShowOfflineUsers(!showOfflineUsers)}
-        >
-          {showOfflineUsers ? 'Hide' : 'Show'} Offline Users
-        </Button>
-      </div>
-
-      {/* Users List */}
-      <div className="space-y-2 max-h-96 overflow-y-auto">
-        {visibleUsers.length === 0 ? (
-          <div className="text-center text-gray-500 py-4">
-            {selectedRole === 'all' ? 'No participants' : `No ${selectedRole}s`} online
-          </div>
-        ) : (
-          visibleUsers.map((user) => {
-            const status = getOnlineStatus(user.lastSeen)
-            
-            return (
-              <div
-                key={user.userId}
-                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="relative">
-                    {user.avatar ? (
-                      <img
-                        src={user.avatar}
-                        alt={user.name}
-                        className="h-8 w-8 rounded-full"
-                      />
-                    ) : (
-                      <div className="h-8 w-8 rounded-full bg-gradient-to-r from-blue-400 to-purple-500 flex items-center justify-center text-white text-sm font-medium">
-                        {user.name.charAt(0).toUpperCase()}
-                      </div>
-                    )}
-                    <div className={`absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-white ${getStatusDot(status)}`} />
-                  </div>
-                  
-                  <div>
-                    <div className="font-medium">{user.name}</div>
-                    <div className="text-sm text-gray-500">
-                      {status === 'online' ? 'Online' : status === 'away' ? 'Away' : 'Offline'}
-                      {status !== 'online' && (
-                        <span className="ml-1">
-                          ({Math.round((new Date().getTime() - new Date(user.lastSeen).getTime()) / (1000 * 60))}m ago)
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <Badge className={getRoleColor(user.role)}>
-                    {user.role}
-                  </Badge>
-                  
-                  {showControls && userInfo?.role === 'organizer' && user.userId !== userInfo.userId && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        // Handle role change or user management
-                        console.log('Manage user:', user.userId)
-                      }}
-                    >
-                      Manage
-                    </Button>
-                  )}
-                </div>
-              </div>
-            )
-          })
         )}
       </div>
+      
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="all">
+            All {showPresence ? `(${presence.totalUsers})` : `(${activePlayers.length})`}
+          </TabsTrigger>
+          {showPresence && (
+            <>
+              <TabsTrigger value="officials">
+                Officials ({presence.officials.length})
+              </TabsTrigger>
+              <TabsTrigger value="players">
+                Players ({presence.players.length})
+              </TabsTrigger>
+              <TabsTrigger value="spectators">
+                Spectators ({presence.spectators.length})
+              </TabsTrigger>
+            </>
+          )}
+          {!showPresence && (
+            <>
+              <TabsTrigger value="checkedIn">
+                Checked In ({checkedInPlayers.length})
+              </TabsTrigger>
+              <TabsTrigger value="active">
+                Active ({activePlayers.length})
+              </TabsTrigger>
+              <TabsTrigger value="stats">
+                Stats
+              </TabsTrigger>
+            </>
+          )}
+        </TabsList>
+        
+        {showPresence ? (
+          <>
+            <TabsContent value="all" className="mt-4">
+              <ParticipantsList 
+                users={presence.activeUsers} 
+                showStats={showPlayerStats}
+                showTime={true}
+              />
+            </TabsContent>
+            
+            <TabsContent value="officials" className="mt-4">
+              <ParticipantsList 
+                users={presence.officials} 
+                showStats={showPlayerStats}
+                showTime={true}
+              />
+            </TabsContent>
+            
+            <TabsContent value="players" className="mt-4">
+              <ParticipantsList 
+                users={presence.players} 
+                showStats={showPlayerStats}
+                showTime={true}
+              />
+            </TabsContent>
+            
+            <TabsContent value="spectators" className="mt-4">
+              <ParticipantsList 
+                users={presence.spectators} 
+                showStats={showPlayerStats}
+                showTime={true}
+              />
+            </TabsContent>
+          </>
+        ) : (
+          <>
+            <TabsContent value="all" className="mt-4">
+              <PlayersList players={activePlayers} showStats={showPlayerStats} />
+            </TabsContent>
+            
+            <TabsContent value="checkedIn" className="mt-4">
+              <PlayersList players={checkedInPlayers} showStats={showPlayerStats} />
+            </TabsContent>
+            
+            <TabsContent value="active" className="mt-4">
+              <PlayersList players={activePlayers} showStats={showPlayerStats} />
+            </TabsContent>
+            
+            <TabsContent value="stats" className="mt-4">
+              <TournamentStats 
+                activePlayers={activePlayers}
+                checkedInPlayers={checkedInPlayers}
+                presenceData={showPresence ? presence : null}
+              />
+            </TabsContent>
+          </>
+        )}
+      </Tabs>
+    </Card>
+  )
+}
 
-      {/* Current User Role Controls */}
-      {showControls && userInfo && isConnected && (
-        <div className="mt-4 pt-4 border-t">
-          <div className="flex items-center justify-between">
-            <div className="text-sm text-gray-600">
-              You are logged in as: <Badge className={getRoleColor(userInfo.role)}>{userInfo.role}</Badge>
+// Component for displaying presence users
+function ParticipantsList({ 
+  users, 
+  showStats = true, 
+  showTime = true 
+}: { 
+  users: any[]
+  showStats?: boolean
+  showTime?: boolean 
+}) {
+  const getRoleVariant = (role: string) => {
+    switch (role) {
+      case 'organizer': return 'default'
+      case 'official': return 'secondary'
+      case 'player': return 'outline'
+      default: return 'outline'
+    }
+  }
+  
+  const getRoleColor = (role: string) => {
+    switch (role) {
+      case 'organizer': return 'text-blue-600'
+      case 'official': return 'text-green-600'
+      case 'player': return 'text-gray-600'
+      default: return 'text-gray-400'
+    }
+  }
+  
+  const getUserInitials = (displayName: string) => {
+    return displayName
+      .split(' ')
+      .map(name => name.charAt(0).toUpperCase())
+      .join('')
+      .substring(0, 2)
+  }
+  
+  const getTimeSince = (timestamp: string) => {
+    const now = new Date()
+    const then = new Date(timestamp)
+    const diffMs = now.getTime() - then.getTime()
+    const diffMins = Math.floor(diffMs / (1000 * 60))
+    
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    
+    const diffHours = Math.floor(diffMins / 60)
+    if (diffHours < 24) return `${diffHours}h ago`
+    
+    const diffDays = Math.floor(diffHours / 24)
+    return `${diffDays}d ago`
+  }
+  
+  if (users.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-500">
+        No participants in this category
+      </div>
+    )
+  }
+  
+  return (
+    <div className="space-y-3">
+      {users.map(user => (
+        <div key={user.userId} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+          <Avatar className="h-10 w-10">
+            <AvatarFallback>
+              {getUserInitials(user.displayName)}
+            </AvatarFallback>
+          </Avatar>
+          
+          <div className="flex-1">
+            <div className="flex items-center space-x-2">
+              <span className="font-medium">{user.displayName}</span>
+              <Badge variant={getRoleVariant(user.role)}>
+                {user.role}
+              </Badge>
+              {user.isActive && (
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+              )}
             </div>
             
-            {userInfo.role !== 'organizer' && (
-              <div className="flex gap-2">
-                {userInfo.role !== 'official' && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => updateUserRole('official')}
-                  >
-                    Become Official
-                  </Button>
-                )}
-                
-                {userInfo.role !== 'spectator' && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => updateUserRole('spectator')}
-                  >
-                    Become Spectator
-                  </Button>
-                )}
+            {showTime && (
+              <div className="text-sm text-gray-500 mt-1">
+                Joined {getTimeSince(user.joinedAt)}
               </div>
             )}
           </div>
         </div>
-      )}
-    </Card>
-  )
-}
-
-// Simple participant count component
-export function ParticipantCount({ 
-  tournamentId, 
-  className = '' 
-}: { 
-  tournamentId: string | null
-  className?: string 
-}) {
-  const { totalUsers, usersByRole, isConnected } = useTournamentPresence(tournamentId, {
-    autoConnect: false
-  })
-
-  return (
-    <div className={`flex items-center gap-2 ${className}`}>
-      <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-400'}`} />
-      <span className="text-sm font-medium">{totalUsers} participants</span>
-      <span className="text-xs text-gray-500">
-        ({usersByRole.player?.length || 0} players, {(usersByRole.official?.length || 0) + (usersByRole.organizer?.length || 0)} officials)
-      </span>
+      ))}
     </div>
   )
 }
 
-// Official presence indicator for tournament organizers
-export function OfficialPresence({ 
-  tournamentId,
-  officialInfo,
-  className = ''
-}: {
-  tournamentId: string | null
-  officialInfo: { userId: string; name: string; avatar?: string }
-  className?: string
+// Component for displaying player data
+function PlayersList({ 
+  players, 
+  showStats = true 
+}: { 
+  players: any[]
+  showStats?: boolean 
 }) {
-  const { officials, organizers, isConnected, totalOfficials } = useOfficialPresence(
-    tournamentId,
-    officialInfo
-  )
-
+  const getUserInitials = (firstName: string, lastName: string) => {
+    return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase()
+  }
+  
+  if (players.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-500">
+        No players in this category
+      </div>
+    )
+  }
+  
   return (
-    <Card className={`p-4 ${className}`}>
-      <div className="flex items-center justify-between mb-3">
-        <h4 className="font-medium">Officials Online</h4>
-        <div className="flex items-center gap-1">
-          <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-          <span className="text-sm">{totalOfficials}</span>
-        </div>
-      </div>
-      
-      <div className="space-y-2">
-        {[...organizers, ...officials].map((official) => (
-          <div key={official.userId} className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded-full bg-gradient-to-r from-blue-400 to-purple-500 flex items-center justify-center text-white text-xs font-medium">
-              {official.name.charAt(0).toUpperCase()}
+    <div className="space-y-3">
+      {players.map(player => (
+        <div key={player.id} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+          <Avatar className="h-10 w-10">
+            <AvatarImage src={player.avatar} />
+            <AvatarFallback>
+              {getUserInitials(player.firstName, player.lastName)}
+            </AvatarFallback>
+          </Avatar>
+          
+          <div className="flex-1">
+            <div className="flex items-center space-x-2">
+              <span className="font-medium">{player.displayName}</span>
+              {player.club && (
+                <Badge variant="outline">{player.club}</Badge>
+              )}
             </div>
-            <div className="text-sm">
-              <span className="font-medium">{official.name}</span>
-              <Badge className={`ml-2 ${getRoleColor(official.role)}`} size="sm">
-                {official.role}
-              </Badge>
-            </div>
+            
+            {showStats && player.stats && (
+              <div className="text-sm text-gray-500 mt-1">
+                {player.stats.matchesPlayed} matches • {player.stats.winPercentage}% win rate
+              </div>
+            )}
           </div>
-        ))}
-        
-        {totalOfficials === 0 && (
-          <div className="text-sm text-gray-500">No officials online</div>
-        )}
-      </div>
-    </Card>
+          
+          <div className="text-right text-sm">
+            <div className="text-gray-600">
+              Format: {player.preferences.preferredFormat}
+            </div>
+            {player.ranking && (
+              <div className="text-gray-500">
+                Rank #{player.ranking}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
   )
 }
 
-function getRoleColor(role: string) {
-  switch (role) {
-    case 'organizer': return 'bg-purple-100 text-purple-800'
-    case 'official': return 'bg-blue-100 text-blue-800'
-    case 'player': return 'bg-green-100 text-green-800'
-    case 'spectator': return 'bg-gray-100 text-gray-800'
-    default: return 'bg-gray-100 text-gray-800'
+// Component for tournament statistics
+function TournamentStats({
+  activePlayers,
+  checkedInPlayers,
+  presenceData
+}: {
+  activePlayers: any[]
+  checkedInPlayers: any[]
+  presenceData: any
+}) {
+  const stats = [
+    {
+      label: 'Total Active Players',
+      value: activePlayers.length,
+      color: 'text-blue-600'
+    },
+    {
+      label: 'Checked In Players',
+      value: checkedInPlayers.length,
+      color: 'text-green-600'
+    },
+    {
+      label: 'Check-in Rate',
+      value: activePlayers.length > 0 
+        ? `${Math.round((checkedInPlayers.length / activePlayers.length) * 100)}%`
+        : '0%',
+      color: 'text-purple-600'
+    }
+  ]
+  
+  if (presenceData) {
+    stats.push(
+      {
+        label: 'Online Users',
+        value: presenceData.totalUsers,
+        color: 'text-green-600'
+      },
+      {
+        label: 'Officials Online',
+        value: presenceData.officials.length,
+        color: 'text-blue-600'
+      },
+      {
+        label: 'Spectators Online',
+        value: presenceData.spectators.length,
+        color: 'text-gray-600'
+      }
+    )
   }
+  
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      {stats.map((stat, index) => (
+        <Card key={index} className="p-4 text-center">
+          <div className={`text-2xl font-bold ${stat.color} mb-1`}>
+            {stat.value}
+          </div>
+          <div className="text-sm text-gray-500">
+            {stat.label}
+          </div>
+        </Card>
+      ))}
+    </div>
+  )
 }

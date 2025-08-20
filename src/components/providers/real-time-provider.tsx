@@ -1,335 +1,330 @@
 'use client'
 
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
-import { createClientComponentClient } from '@/lib/db/supabase'
+import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { useTournamentStore } from '@/stores/tournament-store'
 import { useMatchStore } from '@/stores/match-store'
 import { usePlayerStore } from '@/stores/player-store'
 import { useCourtStore } from '@/stores/court-store'
-import type { RealtimeChannel } from '@supabase/supabase-js'
+import { useTournamentPresence } from '@/hooks/use-tournament-presence'
 
-export interface RealTimeConnectionState {
+export interface RealTimeContextValue {
+  // Connection status
   isConnected: boolean
+  connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error'
+  lastUpdated: string | null
+  
+  // Tournament context
   tournamentId: string | null
-  connectionError: string | null
-  lastUpdate: string | null
-  activeConnections: string[]
-  retryCount: number
-  maxRetries: number
-}
-
-export interface RealTimeContextValue extends RealTimeConnectionState {
-  connectToTournament: (tournamentId: string, userInfo?: any) => Promise<void>
-  disconnectFromTournament: () => Promise<void>
-  retry: () => void
-  broadcastTournamentEvent: (eventType: string, data: any) => void
-  isRetrying: boolean
+  setTournamentId: (id: string | null) => void
+  
+  // Store connections
+  storeConnections: {
+    tournaments: boolean
+    matches: boolean
+    players: boolean
+    courts: boolean
+  }
+  
+  // Presence
+  presenceEnabled: boolean
+  userRole: 'player' | 'official' | 'spectator' | 'organizer'
+  setUserRole: (role: 'player' | 'official' | 'spectator' | 'organizer') => void
+  
+  // Actions
+  connect: () => void
+  disconnect: () => void
+  reconnect: () => void
 }
 
 const RealTimeContext = createContext<RealTimeContextValue | null>(null)
 
 export interface RealTimeProviderProps {
-  children: React.ReactNode
-  autoReconnect?: boolean
-  maxRetries?: number
-  retryDelay?: number
+  children: ReactNode
+  tournamentId?: string | null
+  userId?: string
+  userRole?: 'player' | 'official' | 'spectator' | 'organizer'
+  displayName?: string
   enablePresence?: boolean
-  onConnectionChange?: (connected: boolean) => void
-  onError?: (error: string) => void
+  autoConnect?: boolean
 }
 
 export function RealTimeProvider({
   children,
-  autoReconnect = true,
-  maxRetries = 5,
-  retryDelay = 3000,
+  tournamentId: propTournamentId = null,
+  userId,
+  userRole: propUserRole = 'spectator',
+  displayName,
   enablePresence = true,
-  onConnectionChange,
-  onError
+  autoConnect = true
 }: RealTimeProviderProps) {
-  const [state, setState] = useState<RealTimeConnectionState>({
-    isConnected: false,
-    tournamentId: null,
-    connectionError: null,
-    lastUpdate: null,
-    activeConnections: [],
-    retryCount: 0,
-    maxRetries
+  const [tournamentId, setTournamentId] = useState<string | null>(propTournamentId)
+  const [userRole, setUserRole] = useState<'player' | 'official' | 'spectator' | 'organizer'>(propUserRole)
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected')
+  const [isReconnecting, setIsReconnecting] = useState(false)
+  
+  // Store hooks
+  const {
+    isConnected: tournamentsConnected,
+    lastUpdated: tournamentsLastUpdated,
+    startRealTimeUpdates: startTournamentUpdates,
+    stopRealTimeUpdates: stopTournamentUpdates
+  } = useTournamentStore()
+  
+  const {
+    isConnected: matchesConnected,
+    lastUpdated: matchesLastUpdated,
+    startRealTimeUpdates: startMatchUpdates,
+    stopRealTimeUpdates: stopMatchUpdates
+  } = useMatchStore()
+  
+  const {
+    isConnected: playersConnected,
+    lastUpdated: playersLastUpdated,
+    startRealTimeUpdates: startPlayerUpdates,
+    stopRealTimeUpdates: stopPlayerUpdates
+  } = usePlayerStore()
+  
+  const {
+    isConnected: courtsConnected,
+    lastUpdated: courtsLastUpdated,
+    startRealTimeUpdates: startCourtUpdates,
+    stopRealTimeUpdates: stopCourtUpdates
+  } = useCourtStore()
+  
+  // Presence hook
+  const {
+    connectionStatus: presenceStatus,
+    join: joinPresence,
+    leave: leavePresence,
+    updateRole: updatePresenceRole
+  } = useTournamentPresence({
+    tournamentId,
+    userId,
+    userRole,
+    displayName,
+    autoJoin: enablePresence && autoConnect
   })
-
-  const [isRetrying, setIsRetrying] = useState(false)
   
-  const supabase = createClientComponentClient()
-  const mainChannelRef = useRef<RealtimeChannel | null>(null)
-  const presenceChannelRef = useRef<RealtimeChannel | null>(null)
-  const retryTimeoutRef = useRef<NodeJS.Timeout>()
+  // Calculate overall connection status
+  const storeConnections = {
+    tournaments: tournamentsConnected,
+    matches: matchesConnected,
+    players: playersConnected,
+    courts: courtsConnected
+  }
   
-  // Store references
-  const tournamentStore = useTournamentStore()
-  const matchStore = useMatchStore()
-  const playerStore = usePlayerStore()
-  const courtStore = useCourtStore()
-
-  const setError = useCallback((error: string | null) => {
-    setState(prev => ({ ...prev, connectionError: error }))
-    if (error) {
-      onError?.(error)
-    }
-  }, [onError])
-
-  const setConnectionStatus = useCallback((connected: boolean) => {
-    setState(prev => ({ ...prev, isConnected: connected }))
-    onConnectionChange?.(connected)
-  }, [onConnectionChange])
-
-  // Connect all stores to real-time updates
-  const connectStores = useCallback((tournamentId: string) => {
-    try {
-      tournamentStore.startRealTimeUpdates()
-      matchStore.startRealTimeUpdates(tournamentId)
-      playerStore.startRealTimeUpdates(tournamentId)
-      courtStore.startRealTimeUpdates(tournamentId)
-      
-      setState(prev => ({
-        ...prev,
-        activeConnections: ['tournaments', 'matches', 'players', 'courts']
-      }))
-    } catch (error) {
-      console.error('Error connecting stores:', error)
-      setError('Failed to connect real-time stores')
-    }
-  }, [tournamentStore, matchStore, playerStore, courtStore, setError])
-
-  // Disconnect all stores from real-time updates
-  const disconnectStores = useCallback(() => {
-    try {
-      tournamentStore.stopRealTimeUpdates()
-      matchStore.stopRealTimeUpdates()
-      playerStore.stopRealTimeUpdates()
-      courtStore.stopRealTimeUpdates()
-      
-      setState(prev => ({
-        ...prev,
-        activeConnections: []
-      }))
-    } catch (error) {
-      console.error('Error disconnecting stores:', error)
-    }
-  }, [tournamentStore, matchStore, playerStore, courtStore])
-
-  // Create presence channel for user tracking
-  const createPresenceChannel = useCallback(async (tournamentId: string, userInfo?: any) => {
-    if (!enablePresence || presenceChannelRef.current) return
-
-    try {
-      const channel = supabase.channel(`tournament_presence_${tournamentId}`, {
-        config: { presence: { key: userInfo?.userId || 'anonymous' } }
-      })
-
-      channel
-        .on('presence', { event: 'sync' }, () => {
-          console.log('Presence synced')
-        })
-        .on('presence', { event: 'join' }, ({ newPresences }) => {
-          console.log('User joined:', newPresences)
-        })
-        .on('presence', { event: 'leave' }, ({ leftPresences }) => {
-          console.log('User left:', leftPresences)
-        })
-        .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED' && userInfo) {
-            await channel.track({
-              userId: userInfo.userId,
-              name: userInfo.name || 'Anonymous',
-              role: userInfo.role || 'spectator',
-              joinedAt: new Date().toISOString()
-            })
-          }
-        })
-
-      presenceChannelRef.current = channel
-    } catch (error) {
-      console.error('Error creating presence channel:', error)
-    }
-  }, [supabase, enablePresence])
-
-  // Connect to tournament real-time updates
-  const connectToTournament = useCallback(async (tournamentId: string, userInfo?: any) => {
-    // Don't connect if already connected to the same tournament
-    if (state.isConnected && state.tournamentId === tournamentId) return
-
-    // Disconnect from previous tournament if connected
-    if (state.tournamentId && state.tournamentId !== tournamentId) {
-      await disconnectFromTournament()
-    }
-
-    setState(prev => ({ 
-      ...prev, 
-      tournamentId,
-      connectionError: null,
-      retryCount: 0
-    }))
-    setError(null)
-
-    try {
-      // Create main tournament channel for system-wide events
-      const mainChannel = supabase
-        .channel(`tournament_main_${tournamentId}`)
-        .on('broadcast', { event: 'tournament_event' }, (payload) => {
-          const { eventType, data, timestamp } = payload.payload
-          console.log('Tournament event:', eventType, data)
-          
-          setState(prev => ({ ...prev, lastUpdate: timestamp }))
-        })
-        .on('broadcast', { event: 'system_announcement' }, (payload) => {
-          console.log('System announcement:', payload.payload)
-        })
-        .subscribe((status, error) => {
-          if (error) {
-            setError(`Main channel error: ${error.message}`)
-            setConnectionStatus(false)
-          } else if (status === 'SUBSCRIBED') {
-            setConnectionStatus(true)
-            setState(prev => ({ ...prev, retryCount: 0 }))
-          }
-        })
-
-      mainChannelRef.current = mainChannel
-
-      // Connect all stores to their respective real-time updates
-      connectStores(tournamentId)
-
-      // Create presence channel if enabled
-      if (enablePresence) {
-        await createPresenceChannel(tournamentId, userInfo)
-      }
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to connect to tournament'
-      setError(errorMessage)
-      setConnectionStatus(false)
-      
-      // Auto-retry if enabled
-      if (autoReconnect && state.retryCount < maxRetries) {
-        setState(prev => ({ ...prev, retryCount: prev.retryCount + 1 }))
-        setIsRetrying(true)
-        
-        retryTimeoutRef.current = setTimeout(() => {
-          setIsRetrying(false)
-          connectToTournament(tournamentId, userInfo)
-        }, retryDelay)
-      }
-    }
-  }, [
-    state.isConnected, 
-    state.tournamentId, 
-    state.retryCount, 
-    maxRetries,
-    supabase, 
-    setError, 
-    setConnectionStatus, 
-    connectStores, 
-    createPresenceChannel,
-    autoReconnect,
-    retryDelay,
-    enablePresence
-  ])
-
-  // Disconnect from tournament real-time updates
-  const disconnectFromTournament = useCallback(async () => {
-    // Clear retry timeout
-    if (retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current)
-    }
-
-    // Remove channels
-    if (mainChannelRef.current) {
-      supabase.removeChannel(mainChannelRef.current)
-      mainChannelRef.current = null
-    }
-
-    if (presenceChannelRef.current) {
-      await presenceChannelRef.current.untrack()
-      supabase.removeChannel(presenceChannelRef.current)
-      presenceChannelRef.current = null
-    }
-
-    // Disconnect stores
-    disconnectStores()
-
-    setState(prev => ({
-      ...prev,
-      isConnected: false,
-      tournamentId: null,
-      connectionError: null,
-      lastUpdate: null,
-      activeConnections: [],
-      retryCount: 0
-    }))
-    setConnectionStatus(false)
-    setIsRetrying(false)
-  }, [supabase, disconnectStores, setConnectionStatus])
-
-  // Manual retry function
-  const retry = useCallback(() => {
-    if (state.tournamentId && state.retryCount < maxRetries) {
-      connectToTournament(state.tournamentId)
-    }
-  }, [state.tournamentId, state.retryCount, maxRetries, connectToTournament])
-
-  // Broadcast tournament event
-  const broadcastTournamentEvent = useCallback((eventType: string, data: any) => {
-    if (!mainChannelRef.current || !state.isConnected) return
-
-    mainChannelRef.current.send({
-      type: 'broadcast',
-      event: 'tournament_event',
-      payload: {
-        eventType,
-        data,
-        timestamp: new Date().toISOString()
-      }
-    })
-  }, [state.isConnected])
-
-  // Cleanup on unmount
+  const isConnected = Object.values(storeConnections).some(connected => connected)
+  
+  const lastUpdated = [
+    tournamentsLastUpdated,
+    matchesLastUpdated,
+    playersLastUpdated,
+    courtsLastUpdated
+  ]
+    .filter(Boolean)
+    .sort()
+    .pop() || null
+  
+  // Update connection status based on store connections
   useEffect(() => {
-    return () => {
-      disconnectFromTournament()
+    if (isReconnecting) return
+    
+    const connectedCount = Object.values(storeConnections).filter(Boolean).length
+    const totalStores = Object.keys(storeConnections).length
+    
+    if (connectedCount === 0) {
+      setConnectionStatus('disconnected')
+    } else if (connectedCount === totalStores) {
+      setConnectionStatus('connected')
+    } else {
+      setConnectionStatus('connecting')
     }
-  }, [disconnectFromTournament])
-
-  // Handle network reconnection
+  }, [tournamentsConnected, matchesConnected, playersConnected, courtsConnected, isReconnecting])
+  
+  // Connect to real-time updates
+  const connect = () => {
+    setConnectionStatus('connecting')
+    
+    // Start all store subscriptions
+    startTournamentUpdates()
+    
+    if (tournamentId) {
+      startMatchUpdates(tournamentId)
+      startPlayerUpdates(tournamentId)
+    } else {
+      startMatchUpdates()
+      startPlayerUpdates()
+    }
+    
+    startCourtUpdates()
+    
+    // Join presence if enabled
+    if (enablePresence && tournamentId) {
+      joinPresence(userRole, displayName)
+    }
+  }
+  
+  // Disconnect from real-time updates
+  const disconnect = () => {
+    setConnectionStatus('disconnected')
+    
+    // Stop all store subscriptions
+    stopTournamentUpdates()
+    stopMatchUpdates()
+    stopPlayerUpdates()
+    stopCourtUpdates()
+    
+    // Leave presence if enabled
+    if (enablePresence) {
+      leavePresence()
+    }
+  }
+  
+  // Reconnect to real-time updates
+  const reconnect = async () => {
+    setIsReconnecting(true)
+    setConnectionStatus('connecting')
+    
+    // Disconnect first
+    disconnect()
+    
+    // Wait a bit before reconnecting
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    
+    // Reconnect
+    connect()
+    
+    setIsReconnecting(false)
+  }
+  
+  // Auto-connect effect
+  useEffect(() => {
+    if (autoConnect && connectionStatus === 'disconnected' && !isReconnecting) {
+      connect()
+    }
+    
+    return () => {
+      if (!autoConnect) {
+        disconnect()
+      }
+    }
+  }, [autoConnect, tournamentId])
+  
+  // Update tournament context
+  useEffect(() => {
+    if (propTournamentId !== tournamentId) {
+      setTournamentId(propTournamentId)
+    }
+  }, [propTournamentId])
+  
+  // Handle user role changes
+  useEffect(() => {
+    if (propUserRole !== userRole) {
+      setUserRole(propUserRole)
+      if (enablePresence && tournamentId) {
+        updatePresenceRole(propUserRole)
+      }
+    }
+  }, [propUserRole, userRole, enablePresence, tournamentId])
+  
+  // Handle tournament ID changes
+  useEffect(() => {
+    if (tournamentId && isConnected) {
+      // Restart subscriptions with new tournament ID
+      if (matchesConnected) {
+        stopMatchUpdates()
+        startMatchUpdates(tournamentId)
+      }
+      
+      if (playersConnected) {
+        stopPlayerUpdates()
+        startPlayerUpdates(tournamentId)
+      }
+      
+      // Update presence
+      if (enablePresence) {
+        leavePresence()
+        joinPresence(userRole, displayName)
+      }
+    }
+  }, [tournamentId])
+  
+  // Connection health monitoring
+  useEffect(() => {
+    let healthCheckInterval: NodeJS.Timeout | null = null
+    
+    if (isConnected) {
+      // Check connection health every 30 seconds
+      healthCheckInterval = setInterval(() => {
+        const now = Date.now()
+        const fiveMinutesAgo = now - 5 * 60 * 1000
+        
+        // If no updates in 5 minutes, consider reconnecting
+        if (lastUpdated && new Date(lastUpdated).getTime() < fiveMinutesAgo) {
+          console.warn('No real-time updates received in 5 minutes, reconnecting...')
+          reconnect()
+        }
+      }, 30000)
+    }
+    
+    return () => {
+      if (healthCheckInterval) {
+        clearInterval(healthCheckInterval)
+      }
+    }
+  }, [isConnected, lastUpdated])
+  
+  // Handle network status changes
   useEffect(() => {
     const handleOnline = () => {
-      if (state.tournamentId && !state.isConnected && autoReconnect) {
-        connectToTournament(state.tournamentId)
+      if (connectionStatus === 'error' || connectionStatus === 'disconnected') {
+        console.log('Network reconnected, attempting to reconnect real-time services...')
+        reconnect()
       }
     }
-
+    
     const handleOffline = () => {
-      setError('Network connection lost')
-      setConnectionStatus(false)
+      setConnectionStatus('error')
     }
-
+    
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
-
+    
     return () => {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
-  }, [state.tournamentId, state.isConnected, autoReconnect, connectToTournament, setError, setConnectionStatus])
-
+  }, [connectionStatus])
+  
+  // Cleanup effect
+  useEffect(() => {
+    return () => {
+      disconnect()
+    }
+  }, [])
+  
   const contextValue: RealTimeContextValue = {
-    ...state,
-    connectToTournament,
-    disconnectFromTournament,
-    retry,
-    broadcastTournamentEvent,
-    isRetrying
+    isConnected,
+    connectionStatus,
+    lastUpdated,
+    tournamentId,
+    setTournamentId: (id: string | null) => {
+      setTournamentId(id)
+    },
+    storeConnections,
+    presenceEnabled: enablePresence,
+    userRole,
+    setUserRole: (role: 'player' | 'official' | 'spectator' | 'organizer') => {
+      setUserRole(role)
+      if (enablePresence && tournamentId) {
+        updatePresenceRole(role)
+      }
+    },
+    connect,
+    disconnect,
+    reconnect
   }
-
+  
   return (
     <RealTimeContext.Provider value={contextValue}>
       {children}
@@ -337,76 +332,50 @@ export function RealTimeProvider({
   )
 }
 
-export function useRealTime() {
+// Hook to use the real-time context
+export function useRealTime(): RealTimeContextValue {
   const context = useContext(RealTimeContext)
+  
   if (!context) {
     throw new Error('useRealTime must be used within a RealTimeProvider')
   }
+  
   return context
 }
 
-// Connection status indicator component
-export function ConnectionStatus() {
-  const { isConnected, connectionError, isRetrying, retry, retryCount, maxRetries } = useRealTime()
-
-  if (isConnected) {
-    return (
-      <div className="flex items-center gap-2 text-green-600">
-        <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-        <span className="text-sm">Live</span>
-      </div>
-    )
-  }
-
-  if (isRetrying) {
-    return (
-      <div className="flex items-center gap-2 text-yellow-600">
-        <div className="h-2 w-2 rounded-full bg-yellow-500 animate-spin" />
-        <span className="text-sm">Reconnecting...</span>
-      </div>
-    )
-  }
-
-  if (connectionError) {
-    return (
-      <div className="flex items-center gap-2 text-red-600">
-        <div className="h-2 w-2 rounded-full bg-red-500" />
-        <span className="text-sm">Disconnected</span>
-        {retryCount < maxRetries && (
-          <button 
-            onClick={retry}
-            className="ml-1 text-xs underline hover:no-underline"
-          >
-            Retry
-          </button>
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex items-center gap-2 text-gray-500">
-      <div className="h-2 w-2 rounded-full bg-gray-400" />
-      <span className="text-sm">Offline</span>
-    </div>
-  )
-}
-
-// Hook for tournament-specific real-time connection
-export function useTournamentRealTime(tournamentId: string | null, userInfo?: any) {
-  const realTime = useRealTime()
-
-  useEffect(() => {
-    if (tournamentId) {
-      realTime.connectToTournament(tournamentId, userInfo)
+// Hook for connection status display
+export function useRealTimeStatus() {
+  const { isConnected, connectionStatus, lastUpdated, storeConnections } = useRealTime()
+  
+  const getStatusColor = () => {
+    switch (connectionStatus) {
+      case 'connected': return 'green'
+      case 'connecting': return 'yellow'
+      case 'error': return 'red'
+      default: return 'gray'
     }
-
-    return () => {
-      if (tournamentId) {
-        realTime.disconnectFromTournament()
-      }
+  }
+  
+  const getStatusText = () => {
+    switch (connectionStatus) {
+      case 'connected': return 'Connected'
+      case 'connecting': return 'Connecting...'
+      case 'error': return 'Connection Error'
+      default: return 'Disconnected'
     }
-  }, [tournamentId, realTime, userInfo])
-
-  return realTime
+  }
+  
+  const connectedStores = Object.entries(storeConnections)
+    .filter(([, connected]) => connected)
+    .map(([store]) => store)
+  
+  return {
+    isConnected,
+    connectionStatus,
+    statusColor: getStatusColor(),
+    statusText: getStatusText(),
+    lastUpdated,
+    connectedStores,
+    storeConnections
+  }
 }

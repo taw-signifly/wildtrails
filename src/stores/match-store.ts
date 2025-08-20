@@ -1,83 +1,84 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { persist } from 'zustand/middleware'
-import { Match, MatchStatus } from '@/types'
-import { MatchSupabaseDB } from '@/lib/db/matches-getSupabase()'
-import { createClientComponentClient } from '@/lib/db/getSupabase()'
+import { Match, MatchStatus, Score, Team } from '@/types'
+import { MatchSupabaseDB } from '@/lib/db/matches-supabase'
+import { createClientComponentClient } from '@/lib/db/supabase'
 
 export interface MatchFilter {
-  tournamentId?: string
   status?: MatchStatus[]
+  tournamentId?: string
+  courtId?: string
   round?: number
   teamId?: string
-  courtId?: string
 }
 
 export interface MatchStoreState {
   // Match data
   matches: Match[]
   currentMatch: Match | null
-  activeMatches: Match[]
+  liveMatches: Match[] // matches with status 'active'
   
   // UI state
   loading: boolean
   error: string | null
   
-  // Filters and context
+  // Filters and pagination
   filters: MatchFilter
-  selectedTournamentId: string | null
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    hasMore: boolean
+  }
   
   // Real-time connection
   isConnected: boolean
   lastUpdated: string | null
-  activeLiveScoreSubscriptions: Set<string>
-  realtimeSubscription: any
+  
+  // Live scoring state
+  selectedMatchId: string | null
+  liveScore: Score | null
 }
 
 export interface MatchStoreActions {
   // Match CRUD operations
-  createMatch: (matchData: Omit<Match, 'id' | 'created_at' | 'updated_at'>) => Promise<Match | null>
+  createMatch: (matchData: Partial<Match>) => Promise<Match | null>
   updateMatch: (id: string, updates: Partial<Match>) => Promise<Match | null>
   deleteMatch: (id: string) => Promise<boolean>
   
-  // Match status operations
-  startMatch: (id: string) => Promise<Match | null>
-  completeMatch: (id: string, winnerId: string, score: any) => Promise<Match | null>
-  cancelMatch: (id: string) => Promise<Match | null>
-  
   // Match queries
-  loadMatches: (filters?: MatchFilter, refresh?: boolean) => Promise<void>
+  loadMatches: (refresh?: boolean) => Promise<void>
   loadMatch: (id: string) => Promise<Match | null>
   loadMatchesByTournament: (tournamentId: string) => Promise<void>
-  loadMatchesByRound: (tournamentId: string, round: number) => Promise<void>
-  loadMatchesByTeam: (teamId: string) => Promise<void>
-  loadActiveMatches: () => Promise<void>
+  loadMatchesByCourt: (courtId: string) => Promise<void>
+  loadLiveMatches: () => Promise<void>
   
   // Match management
-  assignToCourt: (matchId: string, courtId: string) => Promise<Match | null>
-  removeCourtAssignment: (matchId: string) => Promise<Match | null>
-  updateScore: (id: string, score: any) => Promise<Match | null>
+  startMatch: (id: string) => Promise<Match | null>
+  completeMatch: (id: string, finalScore: Score, winner: string) => Promise<Match | null>
+  cancelMatch: (id: string) => Promise<Match | null>
+  assignCourt: (matchId: string, courtId: string) => Promise<Match | null>
   
-  // Bracket operations
-  createRoundMatches: (tournamentId: string, round: number, matchesData: any[]) => Promise<Match[]>
+  // Live scoring
+  updateScore: (matchId: string, score: Score) => Promise<Match | null>
+  setSelectedMatch: (matchId: string | null) => void
   
-  // Context management
-  setSelectedTournament: (tournamentId: string | null) => void
-  setCurrentMatch: (match: Match | null) => void
+  // Pagination and filtering
   setFilters: (filters: Partial<MatchFilter>) => void
   clearFilters: () => void
+  loadMore: () => Promise<void>
+  setCurrentPage: (page: number) => Promise<void>
   
-  // Statistics
-  getMatchStats: (tournamentId: string) => Promise<any>
+  // Current match management
+  setCurrentMatch: (match: Match | null) => void
   
   // Real-time updates
   startRealTimeUpdates: (tournamentId?: string) => void
   stopRealTimeUpdates: () => void
   
-  // Live scoring broadcast
-  broadcastLiveScore: (matchId: string, score: any) => void
-  subscribeLiveScoring: (matchId: string) => void
-  unsubscribeLiveScoring: (matchId: string) => void
+  // Broadcast events for live scoring
+  broadcastScore: (matchId: string, score: Score) => void
   
   // Error handling
   clearError: () => void
@@ -92,7 +93,7 @@ export type MatchStore = MatchStoreState & MatchStoreActions
 
 // Lazy initialization for database and client
 let _db: MatchSupabaseDB | null = null;
-let _getSupabase(): ReturnType<typeof createClientComponentClient> | null = null;
+let _supabase: ReturnType<typeof createClientComponentClient> | null = null;
 
 const getDB = () => {
   if (!_db) {
@@ -102,10 +103,10 @@ const getDB = () => {
 }
 
 const getSupabase = () => {
-  if (!_getSupabase()) {
-    _getSupabase() = createClientComponentClient();
+  if (!_supabase) {
+    _supabase = createClientComponentClient();
   }
-  return _getSupabase();
+  return _supabase;
 }
 
 export const useMatchStore = create<MatchStore>()(
@@ -115,30 +116,40 @@ export const useMatchStore = create<MatchStore>()(
         // Initial state
         matches: [],
         currentMatch: null,
-        activeMatches: [],
+        liveMatches: [],
         loading: false,
         error: null,
         filters: {},
-        selectedTournamentId: null,
+        pagination: {
+          page: 1,
+          limit: 20,
+          total: 0,
+          hasMore: false
+        },
         isConnected: false,
         lastUpdated: null,
-        activeLiveScoreSubscriptions: new Set(),
-        realtimeSubscription: null,
+        selectedMatchId: null,
+        liveScore: null,
 
         // Match CRUD operations
-        createMatch: async (matchData) => {
+        createMatch: async (matchData: Partial<Match>) => {
           set({ loading: true, error: null })
           
           try {
-            const result = await getDB().create(matchData)
+            const result = await getDB().create(matchData as Match)
             if (result.error) {
               throw new Error(result.error.message)
             }
             
             const newMatch = result.data
             
+            // Add to store with optimistic update
             set(state => ({
-              matches: [...state.matches, newMatch],
+              matches: [newMatch, ...state.matches],
+              pagination: {
+                ...state.pagination,
+                total: state.pagination.total + 1
+              },
               loading: false,
               lastUpdated: new Date().toISOString()
             }))
@@ -173,9 +184,9 @@ export const useMatchStore = create<MatchStore>()(
               matches: state.matches.map(m => 
                 m.id === id ? updatedMatch : m
               ),
-              activeMatches: state.activeMatches.map(m => 
-                m.id === id ? updatedMatch : m
-              ),
+              liveMatches: updatedMatch.status === 'active' 
+                ? state.liveMatches.map(m => m.id === id ? updatedMatch : m)
+                : state.liveMatches.filter(m => m.id !== id),
               currentMatch: state.currentMatch?.id === id ? updatedMatch : state.currentMatch,
               lastUpdated: new Date().toISOString()
             }))
@@ -196,8 +207,12 @@ export const useMatchStore = create<MatchStore>()(
           // Optimistic removal
           set(state => ({
             matches: state.matches.filter(m => m.id !== id),
-            activeMatches: state.activeMatches.filter(m => m.id !== id),
-            currentMatch: state.currentMatch?.id === id ? null : state.currentMatch
+            liveMatches: state.liveMatches.filter(m => m.id !== id),
+            currentMatch: state.currentMatch?.id === id ? null : state.currentMatch,
+            pagination: {
+              ...state.pagination,
+              total: Math.max(0, state.pagination.total - 1)
+            }
           }))
           
           try {
@@ -217,62 +232,36 @@ export const useMatchStore = create<MatchStore>()(
           }
         },
 
-        // Match status operations
-        startMatch: async (id: string) => {
-          return get().updateMatch(id, { 
-            status: 'in_progress',
-            start_time: new Date().toISOString()
-          })
-        },
-
-        completeMatch: async (id: string, winnerId: string, score: any) => {
-          return get().updateMatch(id, { 
-            status: 'completed',
-            winner_id: winnerId,
-            score,
-            end_time: new Date().toISOString()
-          })
-        },
-
-        cancelMatch: async (id: string) => {
-          return get().updateMatch(id, { status: 'cancelled' })
-        },
-
         // Match queries
-        loadMatches: async (filters?: MatchFilter, refresh = false) => {
+        loadMatches: async (refresh = false) => {
           const state = get()
           
           if (state.loading) return
-          if (!refresh && state.matches.length > 0 && !filters) return
+          if (!refresh && state.matches.length > 0) return
           
           set({ loading: true, error: null })
           
-          if (filters) {
-            set(state => ({ filters: { ...state.filters, ...filters } }))
-          }
-          
           try {
-            let result
-            const currentFilters = filters || state.filters
-
-            if (currentFilters.tournamentId) {
-              result = await getDB().findByTournament(currentFilters.tournamentId)
-            } else if (currentFilters.status) {
-              result = await getDB().findByStatus(currentFilters.status)
-            } else if (currentFilters.teamId) {
-              result = await getDB().findByTeam(currentFilters.teamId)
-            } else if (currentFilters.courtId) {
-              result = await getDB().findByCourt(currentFilters.courtId)
-            } else {
-              result = await getDB().findAll()
-            }
+            const result = await getDB().findPaginated(
+              state.pagination.page,
+              state.pagination.limit,
+              state.filters
+            )
             
             if (result.error) {
               throw new Error(result.error.message)
             }
             
+            const { matches, total, hasMore } = result.data
+            
             set({
-              matches: result.data,
+              matches: refresh ? matches : [...state.matches, ...matches],
+              liveMatches: matches.filter(m => m.status === 'active'),
+              pagination: {
+                ...state.pagination,
+                total,
+                hasMore
+              },
               loading: false,
               lastUpdated: new Date().toISOString()
             })
@@ -312,200 +301,200 @@ export const useMatchStore = create<MatchStore>()(
         },
 
         loadMatchesByTournament: async (tournamentId: string) => {
-          await get().loadMatches({ tournamentId }, true)
-        },
-
-        loadMatchesByRound: async (tournamentId: string, round: number) => {
           set({ loading: true, error: null })
           
           try {
-            const result = await getDB().findByRound(tournamentId, round)
+            const result = await getDB().findByTournament(tournamentId)
             if (result.error) {
               throw new Error(result.error.message)
             }
             
+            const matches = result.data
+            
             set({
-              matches: result.data,
-              filters: { ...get().filters, tournamentId, round },
+              matches,
+              liveMatches: matches.filter(m => m.status === 'active'),
+              pagination: { ...get().pagination, total: matches.length, hasMore: false },
               loading: false,
               lastUpdated: new Date().toISOString()
             })
           } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Failed to load matches by round'
+            const errorMessage = error instanceof Error ? error.message : 'Failed to load tournament matches'
             set({ error: errorMessage, loading: false })
           }
         },
 
-        loadMatchesByTeam: async (teamId: string) => {
-          await get().loadMatches({ teamId }, true)
+        loadMatchesByCourt: async (courtId: string) => {
+          set({ loading: true, error: null })
+          
+          try {
+            const result = await getDB().findByCourt(courtId)
+            if (result.error) {
+              throw new Error(result.error.message)
+            }
+            
+            const matches = result.data
+            
+            set({
+              matches,
+              liveMatches: matches.filter(m => m.status === 'active'),
+              pagination: { ...get().pagination, total: matches.length, hasMore: false },
+              loading: false,
+              lastUpdated: new Date().toISOString()
+            })
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Failed to load court matches'
+            set({ error: errorMessage, loading: false })
+          }
         },
 
-        loadActiveMatches: async () => {
+        loadLiveMatches: async () => {
           try {
-            const result = await getDB().findActive()
+            const result = await getDB().findByStatus('active')
             if (result.error) {
               throw new Error(result.error.message)
             }
             
             set({
-              activeMatches: result.data,
+              liveMatches: result.data,
               lastUpdated: new Date().toISOString()
             })
           } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Failed to load active matches'
+            const errorMessage = error instanceof Error ? error.message : 'Failed to load live matches'
             set({ error: errorMessage })
           }
         },
 
         // Match management
-        assignToCourt: async (matchId: string, courtId: string) => {
+        startMatch: async (id: string) => {
+          return get().updateMatch(id, { 
+            status: 'active' as MatchStatus, 
+            actual_start_time: new Date().toISOString() 
+          })
+        },
+
+        completeMatch: async (id: string, finalScore: Score, winner: string) => {
+          return get().updateMatch(id, { 
+            status: 'completed' as MatchStatus,
+            actual_end_time: new Date().toISOString(),
+            score: finalScore,
+            winner 
+          })
+        },
+
+        cancelMatch: async (id: string) => {
+          return get().updateMatch(id, { status: 'cancelled' as MatchStatus })
+        },
+
+        assignCourt: async (matchId: string, courtId: string) => {
           return get().updateMatch(matchId, { court_id: courtId })
         },
 
-        removeCourtAssignment: async (matchId: string) => {
-          return get().updateMatch(matchId, { court_id: null })
-        },
-
-        updateScore: async (id: string, score: any) => {
-          return get().updateMatch(id, { score })
-        },
-
-        // Bracket operations
-        createRoundMatches: async (tournamentId: string, round: number, matchesData: any[]) => {
-          set({ loading: true, error: null })
+        // Live scoring
+        updateScore: async (matchId: string, score: Score) => {
+          // Broadcast immediately for real-time updates
+          get().broadcastScore(matchId, score)
           
-          try {
-            const result = await getDB().createRoundMatches(tournamentId, round, matchesData)
-            if (result.error) {
-              throw new Error(result.error.message)
-            }
-            
-            const newMatches = result.data
-            
-            set(state => ({
-              matches: [...state.matches, ...newMatches],
-              loading: false,
-              lastUpdated: new Date().toISOString()
-            }))
-            
-            return newMatches
-          } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Failed to create round matches'
-            set({ error: errorMessage, loading: false })
-            return []
-          }
+          // Update database
+          return get().updateMatch(matchId, { score })
         },
 
-        // Context management
-        setSelectedTournament: (tournamentId: string | null) => {
-          set({ selectedTournamentId: tournamentId })
-          if (tournamentId) {
-            get().loadMatchesByTournament(tournamentId)
-          }
+        setSelectedMatch: (matchId: string | null) => {
+          set({ selectedMatchId: matchId })
         },
 
+        // Pagination and filtering
+        setFilters: (filters: Partial<MatchFilter>) => {
+          set(state => ({ 
+            filters: { ...state.filters, ...filters },
+            pagination: { ...state.pagination, page: 1 }
+          }))
+          get().loadMatches(true)
+        },
+
+        clearFilters: () => {
+          set({ 
+            filters: {},
+            pagination: { ...get().pagination, page: 1 }
+          })
+          get().loadMatches(true)
+        },
+
+        loadMore: async () => {
+          const state = get()
+          if (!state.pagination.hasMore || state.loading) return
+          
+          set(state => ({
+            pagination: { ...state.pagination, page: state.pagination.page + 1 }
+          }))
+          
+          await get().loadMatches()
+        },
+
+        setCurrentPage: async (page: number) => {
+          set(state => ({
+            pagination: { ...state.pagination, page },
+            matches: []
+          }))
+          await get().loadMatches(true)
+        },
+
+        // Current match management
         setCurrentMatch: (match: Match | null) => {
           set({ currentMatch: match })
         },
 
-        setFilters: (filters: Partial<MatchFilter>) => {
-          set(state => ({ filters: { ...state.filters, ...filters } }))
-          get().loadMatches(undefined, true)
-        },
-
-        clearFilters: () => {
-          set({ filters: {} })
-          get().loadMatches(undefined, true)
-        },
-
-        // Statistics
-        getMatchStats: async (tournamentId: string) => {
-          try {
-            const result = await getDB().getTournamentMatchStats(tournamentId)
-            return result.error ? null : result.data
-          } catch (error) {
-            set({ error: 'Failed to load match statistics' })
-            return null
-          }
-        },
-
         // Real-time updates
         startRealTimeUpdates: (tournamentId?: string) => {
-          // Stop existing subscription
-          get().stopRealTimeUpdates()
-          
-          const channelName = tournamentId ? `matches_${tournamentId}` : 'matches_all'
-          
           const subscription = getSupabase()
-            .channel(channelName)
+            .channel('matches_changes')
             .on('postgres_changes', 
-              { 
-                event: '*', 
-                schema: 'public', 
-                table: 'matches',
-                filter: tournamentId ? `tournament_id=eq.${tournamentId}` : undefined
-              }, 
+              { event: '*', schema: 'public', table: 'matches' }, 
               (payload) => {
                 const { eventType, new: newRecord, old: oldRecord } = payload
                 
                 set(state => {
                   let newMatches = [...state.matches]
-                  let newActiveMatches = [...state.activeMatches]
+                  let newLiveMatches = [...state.liveMatches]
                   
                   switch (eventType) {
                     case 'INSERT':
-                      if (newRecord) {
+                      if (newRecord && (!tournamentId || newRecord.tournament_id === tournamentId)) {
                         const match = newRecord as Match
-                        // Only add if not already present
-                        if (!newMatches.find(m => m.id === match.id)) {
-                          newMatches = [...newMatches, match]
-                        }
-                        if (match.status === 'in_progress' && !newActiveMatches.find(m => m.id === match.id)) {
-                          newActiveMatches = [...newActiveMatches, match]
+                        newMatches = [match, ...newMatches]
+                        if (match.status === 'active') {
+                          newLiveMatches = [match, ...newLiveMatches]
                         }
                       }
                       break
                     case 'UPDATE':
-                      if (newRecord) {
+                      if (newRecord && (!tournamentId || newRecord.tournament_id === tournamentId)) {
                         const match = newRecord as Match
                         newMatches = newMatches.map(m => 
                           m.id === match.id ? match : m
                         )
                         
-                        // Update active matches
-                        if (match.status === 'in_progress') {
-                          newActiveMatches = newActiveMatches.map(m => 
-                            m.id === match.id ? match : m
-                          )
-                          if (!newActiveMatches.find(m => m.id === match.id)) {
-                            newActiveMatches = [...newActiveMatches, match]
-                          }
+                        // Update live matches
+                        if (match.status === 'active') {
+                          newLiveMatches = newLiveMatches.some(m => m.id === match.id)
+                            ? newLiveMatches.map(m => m.id === match.id ? match : m)
+                            : [match, ...newLiveMatches]
                         } else {
-                          newActiveMatches = newActiveMatches.filter(m => m.id !== match.id)
-                        }
-                        
-                        // Update current match if it's the same
-                        if (state.currentMatch?.id === match.id) {
-                          set({ currentMatch: match })
+                          newLiveMatches = newLiveMatches.filter(m => m.id !== match.id)
                         }
                       }
                       break
                     case 'DELETE':
-                      if (oldRecord) {
+                      if (oldRecord && (!tournamentId || oldRecord.tournament_id === tournamentId)) {
                         newMatches = newMatches.filter(m => m.id !== oldRecord.id)
-                        newActiveMatches = newActiveMatches.filter(m => m.id !== oldRecord.id)
-                        
-                        // Clear current match if it was deleted
-                        if (state.currentMatch?.id === oldRecord.id) {
-                          set({ currentMatch: null })
-                        }
+                        newLiveMatches = newLiveMatches.filter(m => m.id !== oldRecord.id)
                       }
                       break
                   }
                   
                   return {
                     matches: newMatches,
-                    activeMatches: newActiveMatches,
+                    liveMatches: newLiveMatches,
                     lastUpdated: new Date().toISOString(),
                     isConnected: true
                   }
@@ -513,115 +502,40 @@ export const useMatchStore = create<MatchStore>()(
               }
             )
             .on('broadcast', 
-              { event: 'match_event' }, 
+              { event: 'live_score' }, 
               (payload) => {
-                const { type, matchId, data } = payload.payload
-                
-                switch (type) {
-                  case 'match_started':
-                    // Handle match start broadcast
-                    console.log('Match started:', matchId, data)
-                    break
-                  case 'match_completed':
-                    // Handle match completion broadcast
-                    console.log('Match completed:', matchId, data)
-                    break
-                  case 'score_celebration':
-                    // Handle score celebration for real-time UI updates
-                    console.log('Score celebration:', matchId, data)
-                    break
-                }
+                const { matchId, score } = payload.payload
+                set(state => ({
+                  liveScore: state.selectedMatchId === matchId ? score : state.liveScore,
+                  matches: state.matches.map(m => 
+                    m.id === matchId ? { ...m, score } : m
+                  ),
+                  liveMatches: state.liveMatches.map(m => 
+                    m.id === matchId ? { ...m, score } : m
+                  ),
+                  lastUpdated: new Date().toISOString()
+                }))
               }
             )
             .subscribe((status) => {
-              set({ 
-                isConnected: status === 'SUBSCRIBED',
-                realtimeSubscription: status === 'SUBSCRIBED' ? subscription : null
-              })
+              set({ isConnected: status === 'SUBSCRIBED' })
             })
         },
 
         stopRealTimeUpdates: () => {
-          const state = get()
-          
-          // Remove all channels
           getSupabase().removeAllChannels()
-          
-          // Clear live scoring subscriptions
-          state.activeLiveScoreSubscriptions.clear()
-          
-          set({ 
-            isConnected: false,
-            realtimeSubscription: null,
-            activeLiveScoreSubscriptions: new Set()
-          })
+          set({ isConnected: false })
         },
-        
-        // Live scoring broadcast
-        broadcastLiveScore: (matchId: string, score: any) => {
-          const state = get()
-          if (!state.realtimeSubscription) return
-          
-          // Broadcast live score update
-          state.realtimeSubscription.send({
-            type: 'broadcast',
-            event: 'live_score',
-            payload: {
-              matchId,
-              score,
-              timestamp: new Date().toISOString()
-            }
-          })
-        },
-        
-        subscribeLiveScoring: (matchId: string) => {
-          const state = get()
-          if (state.activeLiveScoreSubscriptions.has(matchId)) return
-          
-          const liveChannel = getSupabase()
-            .channel(`live_scoring_${matchId}`)
-            .on('broadcast', 
-              { event: 'live_score' }, 
-              (payload) => {
-                const { matchId: scoreMatchId, score, timestamp } = payload.payload
-                
-                if (scoreMatchId === matchId) {
-                  // Apply optimistic live score update
-                  set(state => {
-                    const updatedMatches = state.matches.map(m => 
-                      m.id === matchId ? { ...m, score } : m
-                    )
-                    const updatedActiveMatches = state.activeMatches.map(m => 
-                      m.id === matchId ? { ...m, score } : m
-                    )
-                    
-                    return {
-                      matches: updatedMatches,
-                      activeMatches: updatedActiveMatches,
-                      currentMatch: state.currentMatch?.id === matchId 
-                        ? { ...state.currentMatch, score } 
-                        : state.currentMatch,
-                      lastUpdated: timestamp
-                    }
-                  })
-                }
-              }
-            )
-            .subscribe()
-            
-          set(state => ({
-            activeLiveScoreSubscriptions: new Set([...state.activeLiveScoreSubscriptions, matchId])
-          }))
-        },
-        
-        unsubscribeLiveScoring: (matchId: string) => {
-          getSupabase().removeChannel(`live_scoring_${matchId}`)
-          
-          set(state => {
-            const newSubscriptions = new Set(state.activeLiveScoreSubscriptions)
-            newSubscriptions.delete(matchId)
-            return { activeLiveScoreSubscriptions: newSubscriptions }
-          })
+
+        // Broadcast events for live scoring
+        broadcastScore: (matchId: string, score: Score) => {
+          getSupabase()
+            .channel('matches_changes')
+            .send({
+              type: 'broadcast',
+              event: 'live_score',
+              payload: { matchId, score }
+            })
         },
 
         // Error handling
@@ -634,7 +548,7 @@ export const useMatchStore = create<MatchStore>()(
             matches: state.matches.map(m => 
               m.id === id ? { ...m, ...updates } : m
             ),
-            activeMatches: state.activeMatches.map(m => 
+            liveMatches: state.liveMatches.map(m => 
               m.id === id ? { ...m, ...updates } : m
             ),
             currentMatch: state.currentMatch?.id === id 
@@ -648,7 +562,7 @@ export const useMatchStore = create<MatchStore>()(
             matches: state.matches.map(m => 
               m.id === id ? originalData : m
             ),
-            activeMatches: state.activeMatches.map(m => 
+            liveMatches: state.liveMatches.map(m => 
               m.id === id ? originalData : m
             ),
             currentMatch: state.currentMatch?.id === id 
@@ -660,12 +574,12 @@ export const useMatchStore = create<MatchStore>()(
       {
         name: 'match-store',
         partialize: (state) => ({
-          // Only persist essential data, not loading states or real-time connections
-          matches: state.matches.slice(-50), // Keep recent matches
+          // Only persist essential data, not loading states
+          matches: state.matches.slice(0, 100), // Limit cached matches
           currentMatch: state.currentMatch,
           filters: state.filters,
-          selectedTournamentId: state.selectedTournamentId
-          // Don't persist: isConnected, realtimeSubscription, activeLiveScoreSubscriptions
+          pagination: state.pagination,
+          selectedMatchId: state.selectedMatchId
         })
       }
     )
@@ -674,7 +588,10 @@ export const useMatchStore = create<MatchStore>()(
 
 // Selector hooks for optimized re-renders
 export const useMatches = () => useMatchStore(state => state.matches)
-export const useActiveMatches = () => useMatchStore(state => state.activeMatches)
+export const useLiveMatches = () => useMatchStore(state => state.liveMatches)
 export const useCurrentMatch = () => useMatchStore(state => state.currentMatch)
 export const useMatchLoading = () => useMatchStore(state => state.loading)
 export const useMatchError = () => useMatchStore(state => state.error)
+export const useMatchConnection = () => useMatchStore(state => state.isConnected)
+export const useSelectedMatch = () => useMatchStore(state => state.selectedMatchId)
+export const useLiveScore = () => useMatchStore(state => state.liveScore)

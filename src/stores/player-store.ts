@@ -1,21 +1,25 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { persist } from 'zustand/middleware'
-import { Player } from '@/types'
-import { PlayerSupabaseDB } from '@/lib/db/players-getSupabase()'
-import { createClientComponentClient } from '@/lib/db/getSupabase()'
+import { Player, GameFormat } from '@/types'
+import { PlayerSupabaseDB } from '@/lib/db/players-supabase'
+import { createClientComponentClient } from '@/lib/db/supabase'
 
 export interface PlayerFilter {
-  search?: string
+  tournamentId?: string
   club?: string
-  ratingRange?: { min: number; max: number }
-  activeOnly?: boolean
+  format?: GameFormat
+  search?: string
+  isCheckedIn?: boolean
+  isEliminated?: boolean
 }
 
 export interface PlayerStoreState {
   // Player data
   players: Player[]
   currentPlayer: Player | null
+  checkedInPlayers: Player[] // players checked in for current tournament
+  activePlayers: Player[] // players still in tournament (not eliminated)
   
   // UI state
   loading: boolean
@@ -33,24 +37,33 @@ export interface PlayerStoreState {
   // Real-time connection
   isConnected: boolean
   lastUpdated: string | null
-  realtimeSubscription: any
-  tournamentSubscriptions: Map<string, any>
+  
+  // Tournament-specific state
+  selectedTournamentId: string | null
+  checkInStatus: Record<string, boolean> // playerId -> checked in status
+  eliminationStatus: Record<string, boolean> // playerId -> elimination status
 }
 
 export interface PlayerStoreActions {
   // Player CRUD operations
-  createPlayer: (playerData: Omit<Player, 'id' | 'created_at' | 'updated_at'>) => Promise<Player | null>
+  createPlayer: (playerData: Partial<Player>) => Promise<Player | null>
   updatePlayer: (id: string, updates: Partial<Player>) => Promise<Player | null>
   deletePlayer: (id: string) => Promise<boolean>
-  deactivatePlayer: (id: string) => Promise<Player | null>
-  reactivatePlayer: (id: string) => Promise<Player | null>
   
   // Player queries
   loadPlayers: (refresh?: boolean) => Promise<void>
   loadPlayer: (id: string) => Promise<Player | null>
+  loadPlayersByTournament: (tournamentId: string) => Promise<void>
   searchPlayers: (query: string) => Promise<void>
-  findPlayersByClub: (club: string) => Promise<void>
-  findPlayerByEmail: (email: string) => Promise<Player | null>
+  
+  // Tournament-specific operations
+  checkInPlayer: (playerId: string, tournamentId: string) => Promise<boolean>
+  checkOutPlayer: (playerId: string, tournamentId: string) => Promise<boolean>
+  eliminatePlayer: (playerId: string, tournamentId: string, reason?: string) => Promise<boolean>
+  reinstatePlayer: (playerId: string, tournamentId: string) => Promise<boolean>
+  
+  // Team formation
+  getAvailablePlayersForTeam: (format: GameFormat, excludePlayerIds?: string[]) => Player[]
   
   // Pagination and filtering
   setFilters: (filters: Partial<PlayerFilter>) => void
@@ -60,15 +73,11 @@ export interface PlayerStoreActions {
   
   // Current player management
   setCurrentPlayer: (player: Player | null) => void
-  getCurrentPlayerStats: (id: string) => Promise<any>
+  setSelectedTournament: (tournamentId: string | null) => void
   
   // Real-time updates
   startRealTimeUpdates: (tournamentId?: string) => void
   stopRealTimeUpdates: () => void
-  
-  // Player event broadcasts
-  broadcastPlayerCheckIn: (playerId: string, tournamentId: string) => void
-  broadcastPlayerTeamJoin: (playerId: string, teamId: string) => void
   
   // Error handling
   clearError: () => void
@@ -83,7 +92,7 @@ export type PlayerStore = PlayerStoreState & PlayerStoreActions
 
 // Lazy initialization for database and client
 let _db: PlayerSupabaseDB | null = null;
-let _getSupabase(): ReturnType<typeof createClientComponentClient> | null = null;
+let _supabase: ReturnType<typeof createClientComponentClient> | null = null;
 
 const getDB = () => {
   if (!_db) {
@@ -93,10 +102,10 @@ const getDB = () => {
 }
 
 const getSupabase = () => {
-  if (!_getSupabase()) {
-    _getSupabase() = createClientComponentClient();
+  if (!_supabase) {
+    _supabase = createClientComponentClient();
   }
-  return _getSupabase();
+  return _supabase;
 }
 
 export const usePlayerStore = create<PlayerStore>()(
@@ -106,9 +115,11 @@ export const usePlayerStore = create<PlayerStore>()(
         // Initial state
         players: [],
         currentPlayer: null,
+        checkedInPlayers: [],
+        activePlayers: [],
         loading: false,
         error: null,
-        filters: { activeOnly: true },
+        filters: {},
         pagination: {
           page: 1,
           limit: 20,
@@ -117,21 +128,23 @@ export const usePlayerStore = create<PlayerStore>()(
         },
         isConnected: false,
         lastUpdated: null,
-        realtimeSubscription: null,
-        tournamentSubscriptions: new Map(),
+        selectedTournamentId: null,
+        checkInStatus: {},
+        eliminationStatus: {},
 
         // Player CRUD operations
-        createPlayer: async (playerData) => {
+        createPlayer: async (playerData: Partial<Player>) => {
           set({ loading: true, error: null })
           
           try {
-            const result = await getDB().create(playerData)
+            const result = await getDB().create(playerData as Player)
             if (result.error) {
               throw new Error(result.error.message)
             }
             
             const newPlayer = result.data
             
+            // Add to store with optimistic update
             set(state => ({
               players: [newPlayer, ...state.players],
               pagination: {
@@ -172,6 +185,12 @@ export const usePlayerStore = create<PlayerStore>()(
               players: state.players.map(p => 
                 p.id === id ? updatedPlayer : p
               ),
+              checkedInPlayers: state.checkedInPlayers.map(p => 
+                p.id === id ? updatedPlayer : p
+              ),
+              activePlayers: state.activePlayers.map(p => 
+                p.id === id ? updatedPlayer : p
+              ),
               currentPlayer: state.currentPlayer?.id === id ? updatedPlayer : state.currentPlayer,
               lastUpdated: new Date().toISOString()
             }))
@@ -192,6 +211,8 @@ export const usePlayerStore = create<PlayerStore>()(
           // Optimistic removal
           set(state => ({
             players: state.players.filter(p => p.id !== id),
+            checkedInPlayers: state.checkedInPlayers.filter(p => p.id !== id),
+            activePlayers: state.activePlayers.filter(p => p.id !== id),
             currentPlayer: state.currentPlayer?.id === id ? null : state.currentPlayer,
             pagination: {
               ...state.pagination,
@@ -214,14 +235,6 @@ export const usePlayerStore = create<PlayerStore>()(
             set({ error: errorMessage })
             return false
           }
-        },
-
-        deactivatePlayer: async (id: string) => {
-          return get().updatePlayer(id, { is_active: false })
-        },
-
-        reactivatePlayer: async (id: string) => {
-          return get().updatePlayer(id, { is_active: true })
         },
 
         // Player queries
@@ -291,6 +304,37 @@ export const usePlayerStore = create<PlayerStore>()(
           }
         },
 
+        loadPlayersByTournament: async (tournamentId: string) => {
+          set({ loading: true, error: null, selectedTournamentId: tournamentId })
+          
+          try {
+            const result = await getDB().findByTournament(tournamentId)
+            if (result.error) {
+              throw new Error(result.error.message)
+            }
+            
+            const players = result.data
+            const checkedInPlayers = players.filter(p => 
+              get().checkInStatus[p.id] === true
+            )
+            const activePlayers = players.filter(p => 
+              get().eliminationStatus[p.id] !== true
+            )
+            
+            set({
+              players,
+              checkedInPlayers,
+              activePlayers,
+              pagination: { ...get().pagination, total: players.length, hasMore: false },
+              loading: false,
+              lastUpdated: new Date().toISOString()
+            })
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Failed to load tournament players'
+            set({ error: errorMessage, loading: false })
+          }
+        },
+
         searchPlayers: async (query: string) => {
           set({ loading: true, error: null, filters: { ...get().filters, search: query } })
           
@@ -312,41 +356,110 @@ export const usePlayerStore = create<PlayerStore>()(
           }
         },
 
-        findPlayersByClub: async (club: string) => {
-          set({ loading: true, error: null })
-          
+        // Tournament-specific operations
+        checkInPlayer: async (playerId: string, tournamentId: string) => {
           try {
-            const result = await getDB().findByClub(club)
+            const result = await getDB().checkIn(playerId, tournamentId)
             if (result.error) {
               throw new Error(result.error.message)
             }
             
-            set({
-              players: result.data,
-              filters: { ...get().filters, club },
-              pagination: { ...get().pagination, page: 1, total: result.data.length, hasMore: false },
-              loading: false,
-              lastUpdated: new Date().toISOString()
+            set(state => {
+              const player = state.players.find(p => p.id === playerId)
+              return {
+                checkInStatus: { ...state.checkInStatus, [playerId]: true },
+                checkedInPlayers: player && !state.checkedInPlayers.some(p => p.id === playerId)
+                  ? [...state.checkedInPlayers, player]
+                  : state.checkedInPlayers,
+                lastUpdated: new Date().toISOString()
+              }
             })
+            
+            return true
           } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Failed to find players by club'
-            set({ error: errorMessage, loading: false })
+            const errorMessage = error instanceof Error ? error.message : 'Failed to check in player'
+            set({ error: errorMessage })
+            return false
           }
         },
 
-        findPlayerByEmail: async (email: string) => {
+        checkOutPlayer: async (playerId: string, tournamentId: string) => {
           try {
-            const result = await getDB().findByEmail(email)
+            const result = await getDB().checkOut(playerId, tournamentId)
             if (result.error) {
               throw new Error(result.error.message)
             }
             
-            return result.data
+            set(state => ({
+              checkInStatus: { ...state.checkInStatus, [playerId]: false },
+              checkedInPlayers: state.checkedInPlayers.filter(p => p.id !== playerId),
+              lastUpdated: new Date().toISOString()
+            }))
+            
+            return true
           } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Failed to find player by email'
+            const errorMessage = error instanceof Error ? error.message : 'Failed to check out player'
             set({ error: errorMessage })
-            return null
+            return false
           }
+        },
+
+        eliminatePlayer: async (playerId: string, tournamentId: string, reason?: string) => {
+          try {
+            const result = await getDB().eliminate(playerId, tournamentId, reason)
+            if (result.error) {
+              throw new Error(result.error.message)
+            }
+            
+            set(state => ({
+              eliminationStatus: { ...state.eliminationStatus, [playerId]: true },
+              activePlayers: state.activePlayers.filter(p => p.id !== playerId),
+              lastUpdated: new Date().toISOString()
+            }))
+            
+            return true
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Failed to eliminate player'
+            set({ error: errorMessage })
+            return false
+          }
+        },
+
+        reinstatePlayer: async (playerId: string, tournamentId: string) => {
+          try {
+            const result = await getDB().reinstate(playerId, tournamentId)
+            if (result.error) {
+              throw new Error(result.error.message)
+            }
+            
+            set(state => {
+              const player = state.players.find(p => p.id === playerId)
+              return {
+                eliminationStatus: { ...state.eliminationStatus, [playerId]: false },
+                activePlayers: player && !state.activePlayers.some(p => p.id === playerId)
+                  ? [...state.activePlayers, player]
+                  : state.activePlayers,
+                lastUpdated: new Date().toISOString()
+              }
+            })
+            
+            return true
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Failed to reinstate player'
+            set({ error: errorMessage })
+            return false
+          }
+        },
+
+        // Team formation
+        getAvailablePlayersForTeam: (format: GameFormat, excludePlayerIds?: string[]) => {
+          const state = get()
+          const excludeSet = new Set(excludePlayerIds || [])
+          
+          return state.activePlayers.filter(player => 
+            !excludeSet.has(player.id) &&
+            (player.preferences.preferredFormat === format || player.preferences.preferredFormat === 'singles') // Singles players can play any format
+          )
         },
 
         // Pagination and filtering
@@ -360,7 +473,7 @@ export const usePlayerStore = create<PlayerStore>()(
 
         clearFilters: () => {
           set({ 
-            filters: { activeOnly: true },
+            filters: {},
             pagination: { ...get().pagination, page: 1 }
           })
           get().loadPlayers(true)
@@ -390,25 +503,14 @@ export const usePlayerStore = create<PlayerStore>()(
           set({ currentPlayer: player })
         },
 
-        getCurrentPlayerStats: async (id: string) => {
-          try {
-            const result = await getDB().getPlayerStats(id)
-            return result.error ? null : result.data
-          } catch (error) {
-            set({ error: 'Failed to load player statistics' })
-            return null
-          }
+        setSelectedTournament: (tournamentId: string | null) => {
+          set({ selectedTournamentId: tournamentId })
         },
 
         // Real-time updates
         startRealTimeUpdates: (tournamentId?: string) => {
-          // Stop existing subscriptions
-          get().stopRealTimeUpdates()
-          
-          const channelName = tournamentId ? `players_tournament_${tournamentId}` : 'players_all'
-          
           const subscription = getSupabase()
-            .channel(channelName)
+            .channel('players_changes')
             .on('postgres_changes', 
               { event: '*', schema: 'public', table: 'players' }, 
               (payload) => {
@@ -416,16 +518,14 @@ export const usePlayerStore = create<PlayerStore>()(
                 
                 set(state => {
                   let newPlayers = [...state.players]
+                  let newCheckedInPlayers = [...state.checkedInPlayers]
+                  let newActivePlayers = [...state.activePlayers]
                   
                   switch (eventType) {
                     case 'INSERT':
                       if (newRecord) {
                         const player = newRecord as Player
-                        // Only add if not already present and matches filters
-                        if (!newPlayers.find(p => p.id === player.id) && 
-                            (!state.filters.activeOnly || player.is_active)) {
-                          newPlayers = [player, ...newPlayers]
-                        }
+                        newPlayers = [player, ...newPlayers]
                       }
                       break
                     case 'UPDATE':
@@ -434,134 +534,79 @@ export const usePlayerStore = create<PlayerStore>()(
                         newPlayers = newPlayers.map(p => 
                           p.id === player.id ? player : p
                         )
-                        
-                        // Update current player if it's the same
-                        if (state.currentPlayer?.id === player.id) {
-                          set({ currentPlayer: player })
-                        }
-                        
-                        // Remove from list if no longer matches filters
-                        if (state.filters.activeOnly && !player.is_active) {
-                          newPlayers = newPlayers.filter(p => p.id !== player.id)
-                        }
+                        newCheckedInPlayers = newCheckedInPlayers.map(p => 
+                          p.id === player.id ? player : p
+                        )
+                        newActivePlayers = newActivePlayers.map(p => 
+                          p.id === player.id ? player : p
+                        )
                       }
                       break
                     case 'DELETE':
                       if (oldRecord) {
                         newPlayers = newPlayers.filter(p => p.id !== oldRecord.id)
-                        
-                        // Clear current player if it was deleted
-                        if (state.currentPlayer?.id === oldRecord.id) {
-                          set({ currentPlayer: null })
-                        }
+                        newCheckedInPlayers = newCheckedInPlayers.filter(p => p.id !== oldRecord.id)
+                        newActivePlayers = newActivePlayers.filter(p => p.id !== oldRecord.id)
                       }
                       break
                   }
                   
                   return {
                     players: newPlayers,
+                    checkedInPlayers: newCheckedInPlayers,
+                    activePlayers: newActivePlayers,
                     lastUpdated: new Date().toISOString(),
                     isConnected: true
                   }
                 })
               }
             )
-            .on('broadcast', 
-              { event: 'player_event' }, 
+            .on('postgres_changes', 
+              { event: '*', schema: 'public', table: 'tournament_players' }, 
               (payload) => {
-                const { type, playerId, data } = payload.payload
+                const { eventType, new: newRecord, old: oldRecord } = payload
                 
-                switch (type) {
-                  case 'player_checked_in':
-                    console.log('Player checked in:', playerId, data)
-                    break
-                  case 'player_team_joined':
-                    console.log('Player joined team:', playerId, data.teamId)
-                    break
-                  case 'player_eliminated':
-                    console.log('Player eliminated:', playerId, data)
-                    break
+                // Handle tournament-specific player updates (check-in, elimination, etc.)
+                if (tournamentId && 
+                    ((newRecord && newRecord.tournament_id === tournamentId) ||
+                     (oldRecord && oldRecord.tournament_id === tournamentId))) {
+                  
+                  set(state => {
+                    const playerId = newRecord?.player_id || oldRecord?.player_id
+                    if (!playerId) return state
+                    
+                    let updates: Partial<PlayerStoreState> = {
+                      lastUpdated: new Date().toISOString()
+                    }
+                    
+                    if (eventType === 'INSERT' || eventType === 'UPDATE') {
+                      if (newRecord?.checked_in) {
+                        updates.checkInStatus = { ...state.checkInStatus, [playerId]: true }
+                        const player = state.players.find(p => p.id === playerId)
+                        if (player && !state.checkedInPlayers.some(p => p.id === playerId)) {
+                          updates.checkedInPlayers = [...state.checkedInPlayers, player]
+                        }
+                      }
+                      
+                      if (newRecord?.eliminated) {
+                        updates.eliminationStatus = { ...state.eliminationStatus, [playerId]: true }
+                        updates.activePlayers = state.activePlayers.filter(p => p.id !== playerId)
+                      }
+                    }
+                    
+                    return { ...state, ...updates }
+                  })
                 }
               }
             )
             .subscribe((status) => {
-              set({ 
-                isConnected: status === 'SUBSCRIBED',
-                realtimeSubscription: status === 'SUBSCRIBED' ? subscription : null
-              })
+              set({ isConnected: status === 'SUBSCRIBED' })
             })
-            
-          // Subscribe to team_members changes if tournamentId provided
-          if (tournamentId) {
-            const teamSubscription = getSupabase()
-              .channel(`team_members_${tournamentId}`)
-              .on('postgres_changes',
-                { event: '*', schema: 'public', table: 'team_members' },
-                (payload) => {
-                  const { eventType, new: newRecord, old: oldRecord } = payload
-                  console.log('Team member change:', eventType, newRecord || oldRecord)
-                  
-                  // This helps track when players join/leave teams in real-time
-                  set({ lastUpdated: new Date().toISOString() })
-                }
-              )
-              .subscribe()
-              
-            set(state => {
-              const newSubscriptions = new Map(state.tournamentSubscriptions)
-              newSubscriptions.set(tournamentId, teamSubscription)
-              return { tournamentSubscriptions: newSubscriptions }
-            })
-          }
         },
 
         stopRealTimeUpdates: () => {
-          const state = get()
-          
-          // Remove all channels
           getSupabase().removeAllChannels()
-          
-          // Clear tournament subscriptions
-          state.tournamentSubscriptions.clear()
-          
-          set({ 
-            isConnected: false,
-            realtimeSubscription: null,
-            tournamentSubscriptions: new Map()
-          })
-        },
-        
-        // Player event broadcasts
-        broadcastPlayerCheckIn: (playerId: string, tournamentId: string) => {
-          const state = get()
-          if (!state.realtimeSubscription) return
-          
-          state.realtimeSubscription.send({
-            type: 'broadcast',
-            event: 'player_event',
-            payload: {
-              type: 'player_checked_in',
-              playerId,
-              tournamentId,
-              timestamp: new Date().toISOString()
-            }
-          })
-        },
-        
-        broadcastPlayerTeamJoin: (playerId: string, teamId: string) => {
-          const state = get()
-          if (!state.realtimeSubscription) return
-          
-          state.realtimeSubscription.send({
-            type: 'broadcast',
-            event: 'player_event',
-            payload: {
-              type: 'player_team_joined',
-              playerId,
-              teamId,
-              timestamp: new Date().toISOString()
-            }
-          })
+          set({ isConnected: false })
         },
 
         // Error handling
@@ -572,6 +617,12 @@ export const usePlayerStore = create<PlayerStore>()(
         optimisticUpdate: (id: string, updates: Partial<Player>) => {
           set(state => ({
             players: state.players.map(p => 
+              p.id === id ? { ...p, ...updates } : p
+            ),
+            checkedInPlayers: state.checkedInPlayers.map(p => 
+              p.id === id ? { ...p, ...updates } : p
+            ),
+            activePlayers: state.activePlayers.map(p => 
               p.id === id ? { ...p, ...updates } : p
             ),
             currentPlayer: state.currentPlayer?.id === id 
@@ -585,6 +636,12 @@ export const usePlayerStore = create<PlayerStore>()(
             players: state.players.map(p => 
               p.id === id ? originalData : p
             ),
+            checkedInPlayers: state.checkedInPlayers.map(p => 
+              p.id === id ? originalData : p
+            ),
+            activePlayers: state.activePlayers.map(p => 
+              p.id === id ? originalData : p
+            ),
             currentPlayer: state.currentPlayer?.id === id 
               ? originalData 
               : state.currentPlayer
@@ -594,12 +651,14 @@ export const usePlayerStore = create<PlayerStore>()(
       {
         name: 'player-store',
         partialize: (state) => ({
-          // Only persist essential data, not loading states or real-time connections
-          players: state.players.slice(0, 100), // Limit cached players
+          // Only persist essential data, not loading states
+          players: state.players.slice(0, 200), // Limit cached players
           currentPlayer: state.currentPlayer,
           filters: state.filters,
-          pagination: state.pagination
-          // Don't persist: isConnected, realtimeSubscription, tournamentSubscriptions
+          pagination: state.pagination,
+          selectedTournamentId: state.selectedTournamentId,
+          checkInStatus: state.checkInStatus,
+          eliminationStatus: state.eliminationStatus
         })
       }
     )
@@ -608,6 +667,10 @@ export const usePlayerStore = create<PlayerStore>()(
 
 // Selector hooks for optimized re-renders
 export const usePlayers = () => usePlayerStore(state => state.players)
+export const useCheckedInPlayers = () => usePlayerStore(state => state.checkedInPlayers)
+export const useActivePlayers = () => usePlayerStore(state => state.activePlayers)
 export const useCurrentPlayer = () => usePlayerStore(state => state.currentPlayer)
 export const usePlayerLoading = () => usePlayerStore(state => state.loading)
 export const usePlayerError = () => usePlayerStore(state => state.error)
+export const usePlayerConnection = () => usePlayerStore(state => state.isConnected)
+export const useSelectedTournamentId = () => usePlayerStore(state => state.selectedTournamentId)
