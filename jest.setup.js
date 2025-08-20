@@ -2,7 +2,7 @@
 // If you delete this file, remove `setupFilesAfterEnv` from `jest.config.js`
 
 // Add custom Jest matchers
-// import '@testing-library/jest-dom'
+import '@testing-library/jest-dom'
 
 // Global test setup can go here
 global.console = {
