@@ -4,7 +4,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDashboardStats } from "@/lib/actions/dashboard";
 
 export async function Statistics() {
-  const stats = await getDashboardStats();
+  const result = await getDashboardStats();
+  
+  // Handle potential errors from the action
+  if (result.error) {
+    throw new Error(`Failed to load dashboard statistics: ${result.error.message}`);
+  }
+  
+  const stats = result.data;
 
   return (
     <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">

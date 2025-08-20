@@ -7,7 +7,14 @@ import { getRecentActivity } from "@/lib/actions/dashboard";
 import { formatRelativeDate } from "@/lib/utils/date";
 
 export async function RecentActivity() {
-  const activities = await getRecentActivity();
+  const result = await getRecentActivity();
+  
+  // Handle potential errors from the action
+  if (result.error) {
+    throw new Error(`Failed to load recent activity: ${result.error.message}`);
+  }
+  
+  const activities = result.data;
 
   const getActivityIcon = (type: string) => {
     switch (type) {

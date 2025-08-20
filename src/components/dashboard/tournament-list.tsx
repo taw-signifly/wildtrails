@@ -3,7 +3,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getRecentTournaments } from "@/lib/actions/dashboard";
 
 export async function TournamentList() {
-  const recentTournaments = await getRecentTournaments();
+  const result = await getRecentTournaments();
+  
+  // Handle potential errors from the action
+  if (result.error) {
+    throw new Error(`Failed to load recent tournaments: ${result.error.message}`);
+  }
+  
+  const recentTournaments = result.data;
 
   return (
     <Card>

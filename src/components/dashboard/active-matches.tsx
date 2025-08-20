@@ -7,7 +7,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getActiveMatches } from "@/lib/actions/dashboard";
 
 export async function ActiveMatches() {
-  const activeMatches = await getActiveMatches();
+  const result = await getActiveMatches();
+  
+  // Handle potential errors from the action
+  if (result.error) {
+    throw new Error(`Failed to load active matches: ${result.error.message}`);
+  }
+  
+  const activeMatches = result.data;
 
   return (
     <Card>

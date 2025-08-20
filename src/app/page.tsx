@@ -8,6 +8,7 @@ import { ActiveMatches } from "@/components/dashboard/active-matches";
 import { Statistics } from "@/components/dashboard/statistics";
 import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { LoadingSpinner } from "@/components/shared/loading-spinner";
+import { DashboardErrorBoundary } from "@/components/ui/error-boundary";
 
 export default function Home() {
   return (
@@ -19,16 +20,20 @@ export default function Home() {
 
       <div className="grid gap-6">
         {/* Statistics Overview */}
-        <Suspense fallback={<LoadingSpinner size="lg" />}>
-          <Statistics />
-        </Suspense>
+        <DashboardErrorBoundary section="Statistics">
+          <Suspense fallback={<LoadingSpinner size="lg" />}>
+            <Statistics />
+          </Suspense>
+        </DashboardErrorBoundary>
 
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-7">
           {/* Tournament List */}
           <div className="col-span-4">
-            <Suspense fallback={<LoadingSpinner size="lg" />}>
-              <TournamentList />
-            </Suspense>
+            <DashboardErrorBoundary section="Tournament List">
+              <Suspense fallback={<LoadingSpinner size="lg" />}>
+                <TournamentList />
+              </Suspense>
+            </DashboardErrorBoundary>
           </div>
 
           {/* Quick Actions */}
@@ -39,14 +44,18 @@ export default function Home() {
 
         <div className="grid gap-6 md:grid-cols-2">
           {/* Active Matches */}
-          <Suspense fallback={<LoadingSpinner size="lg" />}>
-            <ActiveMatches />
-          </Suspense>
+          <DashboardErrorBoundary section="Active Matches">
+            <Suspense fallback={<LoadingSpinner size="lg" />}>
+              <ActiveMatches />
+            </Suspense>
+          </DashboardErrorBoundary>
 
           {/* Recent Activity */}
-          <Suspense fallback={<LoadingSpinner size="lg" />}>
-            <RecentActivity />
-          </Suspense>
+          <DashboardErrorBoundary section="Recent Activity">
+            <Suspense fallback={<LoadingSpinner size="lg" />}>
+              <RecentActivity />
+            </Suspense>
+          </DashboardErrorBoundary>
         </div>
       </div>
     </PageContainer>
