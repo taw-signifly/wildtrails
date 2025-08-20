@@ -1,0 +1,34 @@
+{
+  "id": "eb0404c8-135c-4f95-8878-70965d44b6c6",
+  "name": "WildTrails 2025",
+  "type": "single-elimination",
+  "status": "setup",
+  "format": "singles",
+  "maxPoints": 13,
+  "shortForm": false,
+  "startDate": "2025-08-21T07:00:00.000Z",
+  "description": "The Ultimate ShowDown",
+  "location": "Rue du Moulin, 6987 Rendeux",
+  "organizer": "Signifly",
+  "maxPlayers": 64,
+  "currentPlayers": 0,
+  "settings": {
+    "allowLateRegistration": true,
+    "automaticBracketGeneration": true,
+    "requireCheckin": true,
+    "courtAssignmentMode": "manual",
+    "scoringMode": "self-report",
+    "realTimeUpdates": true,
+    "allowSpectators": true
+  },
+  "stats": {
+    "totalMatches": 0,
+    "completedMatches": 0,
+    "averageMatchDuration": 0,
+    "totalEnds": 0,
+    "highestScore": 0,
+    "averageScore": 0
+  },
+  "createdAt": "2025-08-20T10:57:04.219Z",
+  "updatedAt": "2025-08-20T10:57:04.219Z"
+}
