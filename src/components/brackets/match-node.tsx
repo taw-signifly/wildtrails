@@ -99,6 +99,13 @@ export function MatchNode({
     onHover?.(false)
   }
 
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (interactive && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault()
+      handleClick()
+    }
+  }
+
   if (theme === 'minimal') {
     return (
       <div
@@ -108,6 +115,7 @@ export function MatchNode({
           baseClasses
         )}
         onClick={handleClick}
+        onKeyDown={handleKeyDown}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         role={interactive ? 'button' : undefined}
@@ -143,6 +151,7 @@ export function MatchNode({
         style={containerStyle}
         className={cn('p-2 text-xs', baseClasses)}
         onClick={handleClick}
+        onKeyDown={handleKeyDown}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         role={interactive ? 'button' : undefined}
@@ -179,6 +188,7 @@ export function MatchNode({
       style={containerStyle}
       className={cn('p-3', baseClasses)}
       onClick={handleClick}
+      onKeyDown={handleKeyDown}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       role={interactive ? 'button' : undefined}

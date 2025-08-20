@@ -219,23 +219,17 @@ export function useBracketUpdates({
     connect()
   }, [connect])
 
-  // Initialize connection on mount
+  // Initialize connection and handle cleanup
   useEffect(() => {
     if (tournamentId) {
       connect()
     }
 
+    // Single cleanup function to prevent memory leaks
     return () => {
       disconnect()
     }
-  }, [tournamentId, connect, disconnect])
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      disconnect()
-    }
-  }, [disconnect])
+  }, [tournamentId]) // Remove connect/disconnect from deps to avoid stale closures
 
   return {
     data,

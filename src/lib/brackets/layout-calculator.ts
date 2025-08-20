@@ -19,10 +19,22 @@ export class LayoutCalculator {
    * Calculate layout for single elimination bracket
    */
   calculateSingleEliminationLayout(matches: Match[], config?: Partial<LayoutConfig>): MatchPosition[] {
+    // Input validation
+    if (!matches || matches.length === 0) {
+      return []
+    }
+
     const finalConfig = { ...this.defaultConfig, ...config }
     const positions: MatchPosition[] = []
     const rounds = this.groupMatchesByRound(matches)
-    const maxRound = Math.max(...Object.keys(rounds).map(Number))
+    
+    // Validate rounds data
+    const roundNumbers = Object.keys(rounds).map(Number).filter(n => !isNaN(n))
+    if (roundNumbers.length === 0) {
+      throw new Error('No valid rounds found in matches')
+    }
+    
+    const maxRound = Math.max(...roundNumbers)
     
     Object.keys(rounds).forEach(roundStr => {
       const round = parseInt(roundStr)
@@ -90,6 +102,11 @@ export class LayoutCalculator {
    * Calculate layout for Swiss system display
    */
   calculateSwissSystemLayout(matches: Match[], config?: Partial<LayoutConfig>): MatchPosition[] {
+    // Input validation
+    if (!matches || matches.length === 0) {
+      return []
+    }
+
     const finalConfig = { ...this.defaultConfig, ...config }
     const positions: MatchPosition[] = []
     const rounds = this.groupMatchesByRound(matches)
@@ -126,6 +143,11 @@ export class LayoutCalculator {
    * Calculate layout for round-robin display
    */
   calculateRoundRobinLayout(matches: Match[], config?: Partial<LayoutConfig>): MatchPosition[] {
+    // Input validation
+    if (!matches || matches.length === 0) {
+      return []
+    }
+
     const finalConfig = { ...this.defaultConfig, ...config }
     const positions: MatchPosition[] = []
     
@@ -171,6 +193,11 @@ export class LayoutCalculator {
    * Calculate layout for barrage format
    */
   calculateBarrageLayout(matches: Match[], config?: Partial<LayoutConfig>): MatchPosition[] {
+    // Input validation
+    if (!matches || matches.length === 0) {
+      return []
+    }
+
     const finalConfig = { ...this.defaultConfig, ...config }
     const positions: MatchPosition[] = []
     const rounds = this.groupMatchesByRound(matches)
@@ -338,6 +365,11 @@ export class LayoutCalculator {
    * Calculate bracket dimensions
    */
   calculateBracketDimensions(positions: MatchPosition[]): { width: number; height: number } {
+    // Input validation
+    if (!positions || positions.length === 0) {
+      return { width: 0, height: 0 }
+    }
+
     return {
       width: this.calculateBracketWidth(positions),
       height: this.calculateBracketHeight(positions)

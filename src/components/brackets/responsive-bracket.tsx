@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { Match, Tournament } from '@/types'
 import { BracketRendererProps, LayoutConfig } from '@/types/bracket'
 import { LayoutCalculator } from '@/lib/brackets/layout-calculator'
@@ -42,7 +42,8 @@ export function ResponsiveBracket({
   const [touchStartPos, setTouchStartPos] = useState({ x: 0, y: 0 })
   const [layout, setLayout] = useState<Partial<LayoutConfig>>({})
 
-  const layoutCalculator = new LayoutCalculator()
+  // Memoize layout calculator to prevent recreation on every render
+  const layoutCalculator = useMemo(() => new LayoutCalculator(), [])
 
   // Detect screen size and update view mode
   useEffect(() => {

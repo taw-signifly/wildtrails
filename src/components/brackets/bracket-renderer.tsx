@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Match, Tournament } from '@/types'
 import { BracketRendererProps, MatchPosition, BracketViewState, LineDefinition } from '@/types/bracket'
 import { LayoutCalculator } from '@/lib/brackets/layout-calculator'
@@ -50,7 +50,8 @@ export function BracketRenderer({
   const [positions, setPositions] = useState<MatchPosition[]>([])
   const [connections, setConnections] = useState<LineDefinition[]>([])
 
-  const layoutCalculator = new LayoutCalculator()
+  // Memoize layout calculator to prevent recreation on every render
+  const layoutCalculator = useMemo(() => new LayoutCalculator(), [])
 
   // Calculate positions and connections when matches change
   useEffect(() => {
@@ -231,9 +232,15 @@ export function BracketRenderer({
     }
   }, [positions, containerSize, layoutCalculator])
 
-  // Calculate SVG dimensions
-  const bracketDimensions = layoutCalculator.calculateBracketDimensions(positions)
-  const viewBox = SVGUtils.calculateViewBox(positions, 50)
+  // Calculate SVG dimensions (memoized to prevent recalculation on every render)
+  const bracketDimensions = useMemo(() => 
+    layoutCalculator.calculateBracketDimensions(positions), 
+    [layoutCalculator, positions]
+  )
+  const viewBox = useMemo(() => 
+    SVGUtils.calculateViewBox(positions, 50), 
+    [positions]
+  )
 
   const svgTransform = `translate(${viewState.translateX}, ${viewState.translateY}) scale(${viewState.scale})`
 
