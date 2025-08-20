@@ -410,6 +410,7 @@ export interface MatchFilters {
   round?: number
   bracketType?: BracketType
   courtId?: string
+  tournamentId?: string
   dateRange?: {
     start: string
     end: string
@@ -460,6 +461,29 @@ export {
   RecordNotFoundError,
   FileOperationError
 } from '@/lib/db/base'
+
+// Export scoring types
+export type {
+  EndScoreResult,
+  EndMeasurement,
+  RelativePosition,
+  ScoreValidationResult,
+  ScoreIntegrityCheck,
+  RuleViolation,
+  TeamStatistics as ScoringTeamStatistics,
+  PlayerStatistics as ScoringPlayerStatistics,
+  TournamentStatistics as ScoringTournamentStatistics,
+  EndAnalysis,
+  MatchAnalysis,
+  EndInput,
+  ScoringConfiguration,
+  DistanceCalculationResult,
+  ScoringEngineOptions,
+  ValidationOptions,
+  StatisticsOptions,
+  ScoringEvent,
+  ScoringEngineState
+} from './scoring'
 
 // Export all types for easy importing
 export type {
