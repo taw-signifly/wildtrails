@@ -1,0 +1,34 @@
+{
+  "id": "2d9bb77c-4a3a-442f-9ef3-b448801fb47f",
+  "name": "Spring Championship",
+  "type": "single-elimination",
+  "status": "setup",
+  "format": "doubles",
+  "maxPoints": 13,
+  "shortForm": false,
+  "startDate": "2025-08-27T10:16:44.964Z",
+  "description": "Annual spring tournament",
+  "location": "Main Field",
+  "organizer": "Tournament Committee",
+  "maxPlayers": 16,
+  "currentPlayers": 0,
+  "settings": {
+    "allowLateRegistration": true,
+    "automaticBracketGeneration": true,
+    "requireCheckin": true,
+    "courtAssignmentMode": "automatic",
+    "scoringMode": "self-report",
+    "realTimeUpdates": true,
+    "allowSpectators": true
+  },
+  "stats": {
+    "totalMatches": 0,
+    "completedMatches": 0,
+    "averageMatchDuration": 0,
+    "totalEnds": 0,
+    "highestScore": 0,
+    "averageScore": 0
+  },
+  "createdAt": "2025-08-20T10:16:44.965Z",
+  "updatedAt": "2025-08-20T10:16:44.965Z"
+}
