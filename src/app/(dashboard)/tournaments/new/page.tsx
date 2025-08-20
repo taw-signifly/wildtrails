@@ -4,6 +4,7 @@ import { PageContainer } from "@/components/layout/page-container";
 import { PageHeader } from "@/components/layout/page-header";
 import { TournamentSetupWizard } from "@/components/tournament/setup-wizard";
 import { LoadingSpinner } from "@/components/shared/loading-spinner";
+import { TournamentErrorBoundary } from "@/components/error-boundary";
 
 export default function NewTournamentPage() {
   return (
@@ -18,9 +19,11 @@ export default function NewTournamentPage() {
       />
 
       <div className="mx-auto max-w-4xl">
-        <Suspense fallback={<LoadingSpinner size="lg" />}>
-          <TournamentSetupWizard />
-        </Suspense>
+        <TournamentErrorBoundary>
+          <Suspense fallback={<LoadingSpinner size="lg" />}>
+            <TournamentSetupWizard />
+          </Suspense>
+        </TournamentErrorBoundary>
       </div>
     </PageContainer>
   );

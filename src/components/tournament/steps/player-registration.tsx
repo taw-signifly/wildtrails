@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { TeamFormationInterface } from '../team-formation'
 import type { PlayerRegistration as PlayerRegistrationType, PlayerEntry } from '@/lib/validation/tournament-setup'
+import { PlayerEntrySchema } from '@/lib/validation/tournament-setup'
 
 export function PlayerRegistration() {
   const { setupData, updateStepData } = useTournamentSetup()
@@ -24,27 +25,54 @@ export function PlayerRegistration() {
   }, [setupData.players])
 
   const handleAddPlayer = () => {
+    // Basic required field validation
     if (!newPlayer.firstName || !newPlayer.lastName || !newPlayer.email) {
       setErrors({ add: 'First name, last name, and email are required' })
       return
     }
 
+    // SECURITY: Input sanitization function
+    const sanitizeInput = (input: string): string => {
+      return input
+        .trim()
+        .replace(/[<>\"'&]/g, '') // Basic XSS prevention
+        .substring(0, 100) // Length limit
+    }
+
+    // SECURITY: Validate email format with proper regex
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    const sanitizedEmail = newPlayer.email.trim().toLowerCase()
+    if (!emailRegex.test(sanitizedEmail)) {
+      setErrors({ add: 'Please enter a valid email address' })
+      return
+    }
+
     // Check for duplicate email
-    const existingPlayer = formData.players?.find(p => p.email === newPlayer.email)
+    const existingPlayer = formData.players?.find(p => p.email === sanitizedEmail)
     if (existingPlayer) {
       setErrors({ add: 'A player with this email already exists' })
       return
     }
 
-    const player: PlayerEntry = {
-      firstName: newPlayer.firstName.trim(),
-      lastName: newPlayer.lastName.trim(),
-      email: newPlayer.email.trim().toLowerCase(),
-      phone: newPlayer.phone?.trim() || '',
-      club: newPlayer.club?.trim() || '',
+    // SECURITY: Create player with sanitized inputs
+    const playerData: Partial<PlayerEntry> = {
+      firstName: sanitizeInput(newPlayer.firstName),
+      lastName: sanitizeInput(newPlayer.lastName),
+      email: sanitizedEmail,
+      phone: newPlayer.phone ? sanitizeInput(newPlayer.phone) : undefined,
+      club: newPlayer.club ? sanitizeInput(newPlayer.club) : undefined,
       ranking: newPlayer.ranking
     }
 
+    // SECURITY: Validate with Zod schema before adding
+    const validationResult = PlayerEntrySchema.safeParse(playerData)
+    if (!validationResult.success) {
+      const errorMessages = validationResult.error.issues.map(err => err.message).join(', ')
+      setErrors({ add: `Validation failed: ${errorMessages}` })
+      return
+    }
+
+    const player = validationResult.data
     const updatedPlayers = [...(formData.players || []), player]
     const newData = { ...formData, players: updatedPlayers }
     setFormData(newData)
@@ -67,72 +95,176 @@ export function PlayerRegistration() {
     const file = event.target.files?.[0]
     if (!file) return
 
+    // SECURITY: File size validation (max 5MB)
+    const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
+    if (file.size > MAX_FILE_SIZE) {
+      setErrors({ import: 'File size must be less than 5MB' })
+      event.target.value = ''
+      return
+    }
+
+    // SECURITY: MIME type validation
+    const allowedTypes = ['text/csv', 'application/json', 'text/plain']
+    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(csv|json)$/i)) {
+      setErrors({ import: 'Invalid file type. Only CSV and JSON files are allowed.' })
+      event.target.value = ''
+      return
+    }
+
     try {
       const text = await file.text()
-      let players: PlayerEntry[] = []
+      
+      // SECURITY: Content length validation after read
+      const MAX_CONTENT_LENGTH = 1024 * 1024 // 1MB text limit
+      if (text.length > MAX_CONTENT_LENGTH) {
+        setErrors({ import: 'File content too large. Maximum 1MB of text allowed.' })
+        event.target.value = ''
+        return
+      }
 
-      if (file.name.endsWith('.json')) {
-        const data = JSON.parse(text)
-        players = Array.isArray(data) ? data : [data]
-      } else if (file.name.endsWith('.csv')) {
-        const lines = text.split('\n').filter(line => line.trim())
-        const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
+      let players: Partial<PlayerEntry>[] = []
+
+      if (file.type === 'application/json' || file.name.endsWith('.json')) {
+        try {
+          const data = JSON.parse(text)
+          // SECURITY: Validate JSON structure
+          if (!Array.isArray(data) && typeof data !== 'object') {
+            throw new Error('Invalid JSON structure')
+          }
+          players = Array.isArray(data) ? data : [data]
+        } catch {
+          setErrors({ import: 'Invalid JSON format. Please check the file structure.' })
+          event.target.value = ''
+          return
+        }
+      } else if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+        // SECURITY: Improved CSV parsing with injection protection
+        const lines = text.split('\n').filter(line => line.trim()).slice(0, 1000) // Limit rows to prevent DoS
+        if (lines.length === 0) {
+          setErrors({ import: 'Empty CSV file' })
+          event.target.value = ''
+          return
+        }
+
+        const headers = lines[0].toLowerCase().split(',').map(h => 
+          h.trim().replace(/[^a-z_\s]/g, '').replace(/\s+/g, '_') // Sanitize headers
+        )
         
         players = lines.slice(1).map(line => {
-          const values = line.split(',').map(v => v.trim().replace(/"/g, ''))
+          // SECURITY: Prevent CSV injection
+          if (line.trim().startsWith('=') || line.trim().startsWith('+') || 
+              line.trim().startsWith('-') || line.trim().startsWith('@')) {
+            return null // Skip potentially malicious rows
+          }
+          
+          const values = line.split(',').map(v => 
+            v.trim().replace(/"/g, '').substring(0, 100) // Limit field length
+          )
           const player: Partial<PlayerEntry> = {}
           
           headers.forEach((header, index) => {
             const value = values[index]
-            if (!value) return
+            if (!value || value.length === 0) return
+            
+            // SECURITY: Sanitize input values
+            const sanitizedValue = value.replace(/[<>\"'&]/g, '').trim() // Basic XSS prevention
             
             switch (header) {
               case 'firstname':
               case 'first_name':
-              case 'first name':
-                player.firstName = value
+              case 'first_name':
+                if (sanitizedValue.length > 0 && sanitizedValue.length <= 50) {
+                  player.firstName = sanitizedValue
+                }
                 break
               case 'lastname':
               case 'last_name':
-              case 'last name':
-                player.lastName = value
+              case 'last_name':
+                if (sanitizedValue.length > 0 && sanitizedValue.length <= 50) {
+                  player.lastName = sanitizedValue
+                }
                 break
               case 'email':
-                player.email = value.toLowerCase()
+                // Validate email format before assignment
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+                if (emailRegex.test(sanitizedValue)) {
+                  player.email = sanitizedValue.toLowerCase()
+                }
                 break
               case 'phone':
-                player.phone = value
+                if (sanitizedValue.length <= 20) {
+                  player.phone = sanitizedValue
+                }
                 break
               case 'club':
-                player.club = value
+                if (sanitizedValue.length <= 100) {
+                  player.club = sanitizedValue
+                }
                 break
               case 'ranking':
-                player.ranking = parseInt(value) || undefined
+                const rankingNum = parseInt(sanitizedValue)
+                if (!isNaN(rankingNum) && rankingNum >= 1 && rankingNum <= 1000) {
+                  player.ranking = rankingNum
+                }
                 break
             }
           })
           
-          return player as PlayerEntry
-        }).filter(p => p.firstName && p.lastName && p.email)
-      }
-
-      // Validate and add players
-      const validPlayers = players.filter(p => 
-        p.firstName && p.lastName && p.email && 
-        !formData.players?.some(existing => existing.email === p.email)
-      )
-
-      if (validPlayers.length > 0) {
-        const updatedPlayers = [...(formData.players || []), ...validPlayers]
-        const newData = { ...formData, players: updatedPlayers }
-        setFormData(newData)
-        updateStepData('players', newData)
-        setErrors({ import: `Successfully imported ${validPlayers.length} players` })
+          return player
+        }).filter(Boolean) as Partial<PlayerEntry>[] // Remove null entries
       } else {
-        setErrors({ import: 'No valid players found in file' })
+        setErrors({ import: 'Unsupported file format. Please use CSV or JSON files.' })
+        event.target.value = ''
+        return
       }
-    } catch {
-      setErrors({ import: 'Failed to parse file. Please check the format.' })
+
+      // SECURITY: Validate all imported data with Zod schemas
+      const validationResults = players.map(player => {
+        const result = PlayerEntrySchema.safeParse(player)
+        return { player, result }
+      })
+
+      const validPlayers = validationResults
+        .filter(({ result }) => result.success)
+        .map(({ result }) => result.data!)
+        .filter(player => !formData.players?.some(existing => existing.email === player.email)) // Remove duplicates
+
+      const invalidCount = players.length - validPlayers.length
+      
+      if (validPlayers.length === 0) {
+        const errorMsg = invalidCount > 0 
+          ? `No valid players found. ${invalidCount} entries failed validation.`
+          : 'No valid players found in file. Please check the format and required fields.'
+        setErrors({ import: errorMsg })
+        event.target.value = ''
+        return
+      }
+
+      // Limit total players to prevent memory issues
+      const maxTotalPlayers = setupData.settings?.maxPlayers || 200
+      const currentPlayerCount = formData.players?.length || 0
+      const playersToAdd = validPlayers.slice(0, Math.max(0, maxTotalPlayers - currentPlayerCount))
+      
+      if (playersToAdd.length < validPlayers.length) {
+        setErrors({ 
+          import: `Imported ${playersToAdd.length} players (${validPlayers.length - playersToAdd.length} skipped due to player limit)` 
+        })
+      } else {
+        let message = `Successfully imported ${playersToAdd.length} players`
+        if (invalidCount > 0) {
+          message += ` (${invalidCount} entries skipped due to validation errors)`
+        }
+        setErrors({ import: message })
+      }
+
+      const updatedPlayers = [...(formData.players || []), ...playersToAdd]
+      const newData = { ...formData, players: updatedPlayers }
+      setFormData(newData)
+      updateStepData('players', newData)
+
+    } catch (error) {
+      console.error('File import error:', error)
+      setErrors({ import: 'Failed to process file. Please check the format and try again.' })
     }
 
     // Reset file input

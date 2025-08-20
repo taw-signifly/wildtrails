@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import type { 
   WizardStep, 
@@ -8,6 +8,13 @@ import type {
   TournamentSettingsForm, 
   PlayerRegistration, 
   BracketConfiguration
+} from '@/lib/validation/tournament-setup'
+import { 
+  validateBasicInformation, 
+  validateTournamentSettings, 
+  validatePlayerRegistration, 
+  validateBracketConfiguration,
+  validateCompleteSetup 
 } from '@/lib/validation/tournament-setup'
 import { createTournamentData } from '@/lib/actions/tournaments'
 import type { TournamentFormData } from '@/types'
@@ -29,23 +36,90 @@ export function useTournamentSetup() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  // Load saved data from localStorage on mount
+  // Load saved data from localStorage on mount with security validation
   useEffect(() => {
     const savedData = localStorage.getItem(STORAGE_KEY)
     if (savedData) {
       try {
         const parsed = JSON.parse(savedData)
-        setSetupData(parsed)
+        
+        // SECURITY: Validate structure before using saved data
+        if (typeof parsed === 'object' && parsed !== null) {
+          const validatedData: SetupState = {}
+          
+          // Validate each step's data with Zod schemas
+          if (parsed.basic) {
+            const basicResult = validateBasicInformation(parsed.basic)
+            if (basicResult.success) {
+              validatedData.basic = basicResult.data
+            } else {
+              console.warn('Invalid basic information in saved data:', basicResult.error.issues)
+            }
+          }
+          
+          if (parsed.settings) {
+            const settingsResult = validateTournamentSettings(parsed.settings)
+            if (settingsResult.success) {
+              validatedData.settings = settingsResult.data
+            } else {
+              console.warn('Invalid tournament settings in saved data:', settingsResult.error.issues)
+            }
+          }
+          
+          if (parsed.players) {
+            const playersResult = validatePlayerRegistration(parsed.players)
+            if (playersResult.success) {
+              validatedData.players = playersResult.data
+            } else {
+              console.warn('Invalid player registration in saved data:', playersResult.error.issues)
+            }
+          }
+          
+          if (parsed.bracket) {
+            const bracketResult = validateBracketConfiguration(parsed.bracket)
+            if (bracketResult.success) {
+              validatedData.bracket = bracketResult.data
+            } else {
+              console.warn('Invalid bracket configuration in saved data:', bracketResult.error.issues)
+            }
+          }
+          
+          // Only set data if we have at least one valid section
+          if (Object.keys(validatedData).length > 0) {
+            setSetupData(validatedData)
+          }
+        }
       } catch (error) {
-        console.warn('Failed to load saved tournament setup:', error)
+        console.warn('Invalid saved tournament setup data, clearing localStorage:', error)
+        localStorage.removeItem(STORAGE_KEY)
       }
     }
   }, [])
 
-  // Save data to localStorage whenever setupData changes
+  // PERFORMANCE: Debounced localStorage saves to prevent excessive writes
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   useEffect(() => {
     if (Object.keys(setupData).length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(setupData))
+      // Clear any existing timeout
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+      
+      // Debounce localStorage writes by 500ms
+      saveTimeoutRef.current = setTimeout(() => {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(setupData))
+        } catch (error) {
+          console.warn('Failed to save tournament setup to localStorage:', error)
+        }
+      }, 500)
+    }
+    
+    // Cleanup timeout on unmount
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
     }
   }, [setupData])
 
@@ -125,19 +199,59 @@ export function useTournamentSetup() {
     setErrors({})
 
     try {
-      // Transform setup data to tournament form data
+      // SECURITY: Validate all step data before submission
+      const basicResult = validateBasicInformation(setupData.basic)
+      if (!basicResult.success) {
+        setErrors({ submit: 'Please complete basic information step with valid data' })
+        return false
+      }
+
+      const settingsResult = validateTournamentSettings(setupData.settings)
+      if (!settingsResult.success) {
+        setErrors({ submit: 'Please complete tournament settings step with valid data' })
+        return false
+      }
+
+      const playersResult = validatePlayerRegistration(setupData.players)
+      if (!playersResult.success) {
+        setErrors({ submit: 'Please complete player registration step with valid data' })
+        return false
+      }
+
+      const bracketResult = validateBracketConfiguration(setupData.bracket)
+      if (!bracketResult.success) {
+        setErrors({ submit: 'Please complete bracket configuration step with valid data' })
+        return false
+      }
+
+      // SECURITY: Validate complete setup with cross-field validation
+      const completeSetupData = {
+        ...basicResult.data,
+        ...settingsResult.data,
+        ...playersResult.data,
+        ...bracketResult.data
+      }
+      
+      const completeValidation = validateCompleteSetup(completeSetupData)
+      if (!completeValidation.success) {
+        const errorMessages = completeValidation.error.issues.map(err => err.message).join(', ')
+        setErrors({ submit: `Validation failed: ${errorMessages}` })
+        return false
+      }
+
+      // Transform validated data to tournament form data
       const tournamentData: TournamentFormData = {
-        name: setupData.basic!.name!,
-        type: setupData.basic!.type!,
-        format: setupData.basic!.format!,
-        maxPoints: setupData.settings!.maxPoints || 13,
-        shortForm: setupData.settings!.shortForm || false,
-        startDate: setupData.basic!.startDate!,
-        description: setupData.basic!.description,
-        location: setupData.basic!.location,
-        organizer: setupData.basic!.organizer!,
-        maxPlayers: setupData.settings!.maxPlayers!,
-        settings: setupData.settings!.settings || {}
+        name: basicResult.data.name,
+        type: basicResult.data.type,
+        format: basicResult.data.format,
+        maxPoints: settingsResult.data.maxPoints || 13,
+        shortForm: settingsResult.data.shortForm || false,
+        startDate: basicResult.data.startDate,
+        description: basicResult.data.description,
+        location: basicResult.data.location,
+        organizer: basicResult.data.organizer,
+        maxPlayers: settingsResult.data.maxPlayers,
+        settings: settingsResult.data.settings || {}
       }
 
       const result = await createTournamentData(tournamentData)
@@ -146,8 +260,13 @@ export function useTournamentSetup() {
         // Clear saved data on successful creation
         localStorage.removeItem(STORAGE_KEY)
         
-        // Redirect to tournament dashboard or detail page
-        router.push(`/tournaments/${result.data.id}`)
+        // SECURITY: Validate navigation route exists
+        if (result.data?.id) {
+          router.push(`/tournaments/${result.data.id}`)
+        } else {
+          // Fallback to tournaments list if no ID returned
+          router.push('/tournaments')
+        }
         return true
       } else {
         setErrors({ 
@@ -158,7 +277,7 @@ export function useTournamentSetup() {
       }
     } catch (error) {
       console.error('Tournament creation error:', error)
-      setErrors({ submit: 'An unexpected error occurred' })
+      setErrors({ submit: 'An unexpected error occurred while creating the tournament' })
       return false
     } finally {
       setIsSubmitting(false)

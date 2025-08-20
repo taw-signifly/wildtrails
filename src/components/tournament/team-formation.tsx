@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -26,72 +26,89 @@ export function TeamFormationInterface({
   onTeamsChange
 }: Props) {
   const [teams, setTeams] = useState<Team[]>(existingTeams)
-  const [unassignedPlayers, setUnassignedPlayers] = useState<PlayerEntry[]>([])
   const [draggedPlayer, setDraggedPlayer] = useState<string | null>(null)
 
-  useEffect(() => {
-    // Update unassigned players when teams or players change
+  // PERFORMANCE: Memoize expensive calculations
+  const unassignedPlayers = useMemo(() => {
     const assignedEmails = new Set(teams.flatMap(team => team.players))
-    const unassigned = players.filter(player => !assignedEmails.has(player.email))
-    setUnassignedPlayers(unassigned)
+    return players.filter(player => !assignedEmails.has(player.email))
   }, [players, teams])
+
+  const canFormMinimumTeams = useMemo(() => 
+    players.length >= playersPerTeam * 4, [players.length, playersPerTeam]
+  )
+  
+  const optimalTeams = useMemo(() => 
+    Math.floor(players.length / playersPerTeam), [players.length, playersPerTeam]
+  )
+
+  // PERFORMANCE: Memoize player lookup functions
+  const playerLookup = useMemo(() => {
+    const lookup = new Map<string, PlayerEntry>()
+    players.forEach(player => lookup.set(player.email, player))
+    return lookup
+  }, [players])
 
   useEffect(() => {
     onTeamsChange(teams)
   }, [teams, onTeamsChange])
 
-  const createNewTeam = () => {
+  // PERFORMANCE: Memoize callbacks to prevent re-renders
+  const createNewTeam = useCallback(() => {
     const teamNumber = teams.length + 1
     const newTeam: Team = {
       id: `team-${Date.now()}`,
       name: `Team ${teamNumber}`,
       players: []
     }
-    setTeams([...teams, newTeam])
-  }
+    setTeams(prevTeams => [...prevTeams, newTeam])
+  }, [teams.length])
 
-  const deleteTeam = (teamId: string) => {
-    setTeams(teams.filter(team => team.id !== teamId))
-  }
+  const deleteTeam = useCallback((teamId: string) => {
+    setTeams(prevTeams => prevTeams.filter(team => team.id !== teamId))
+  }, [])
 
-  const updateTeamName = (teamId: string, name: string) => {
-    setTeams(teams.map(team => 
+  const updateTeamName = useCallback((teamId: string, name: string) => {
+    setTeams(prevTeams => prevTeams.map(team => 
       team.id === teamId ? { ...team, name } : team
     ))
-  }
+  }, [])
 
-  const addPlayerToTeam = (teamId: string, playerEmail: string) => {
-    const team = teams.find(t => t.id === teamId)
-    if (!team || team.players.length >= playersPerTeam) return
+  const addPlayerToTeam = useCallback((teamId: string, playerEmail: string) => {
+    setTeams(prevTeams => {
+      const team = prevTeams.find(t => t.id === teamId)
+      if (!team || team.players.length >= playersPerTeam) return prevTeams
 
-    setTeams(teams.map(t => 
-      t.id === teamId 
-        ? { ...t, players: [...t.players, playerEmail] }
-        : { ...t, players: t.players.filter(p => p !== playerEmail) }
-    ))
-  }
+      return prevTeams.map(t => 
+        t.id === teamId 
+          ? { ...t, players: [...t.players, playerEmail] }
+          : { ...t, players: t.players.filter(p => p !== playerEmail) }
+      )
+    })
+  }, [playersPerTeam])
 
-  const removePlayerFromTeam = (teamId: string, playerEmail: string) => {
-    setTeams(teams.map(team => 
+  const removePlayerFromTeam = useCallback((teamId: string, playerEmail: string) => {
+    setTeams(prevTeams => prevTeams.map(team => 
       team.id === teamId 
         ? { ...team, players: team.players.filter(p => p !== playerEmail) }
         : team
     ))
-  }
+  }, [])
 
-  const autoFormTeams = () => {
+  // PERFORMANCE: Memoize expensive auto-formation logic
+  const autoFormTeams = useCallback(() => {
     const availablePlayers = [...players]
-    const newTeams: Team[] = []
     
-    // Sort by ranking if available (lower is better)
+    // Sort by ranking efficiently
     availablePlayers.sort((a, b) => {
-      if (a.ranking && b.ranking) return a.ranking - b.ranking
-      if (a.ranking) return -1
-      if (b.ranking) return 1
-      return 0
+      const aRank = a.ranking ?? Infinity
+      const bRank = b.ranking ?? Infinity
+      return aRank - bRank
     })
 
+    const newTeams: Team[] = []
     let teamCounter = 1
+    
     while (availablePlayers.length >= playersPerTeam) {
       const teamPlayers: string[] = []
       
@@ -112,19 +129,20 @@ export function TeamFormationInterface({
     }
 
     setTeams(newTeams)
-  }
+  }, [players, playersPerTeam])
 
-  const clearAllTeams = () => {
+  const clearAllTeams = useCallback(() => {
     setTeams([])
-  }
+  }, [])
 
-  const getPlayerName = (email: string) => {
-    const player = players.find(p => p.email === email)
+  // PERFORMANCE: Use memoized player lookup for fast name resolution
+  const getPlayerName = useCallback((email: string) => {
+    const player = playerLookup.get(email)
     return player ? `${player.firstName} ${player.lastName}` : email
-  }
+  }, [playerLookup])
 
-  const getPlayerDetails = (email: string) => {
-    const player = players.find(p => p.email === email)
+  const getPlayerDetails = useCallback((email: string) => {
+    const player = playerLookup.get(email)
     if (!player) return ''
     
     const details = []
@@ -132,26 +150,24 @@ export function TeamFormationInterface({
     if (player.ranking) details.push(`#${player.ranking}`)
     
     return details.join(' • ')
-  }
+  }, [playerLookup])
 
-  const handleDragStart = (playerEmail: string) => {
+  // PERFORMANCE: Memoize drag handlers
+  const handleDragStart = useCallback((playerEmail: string) => {
     setDraggedPlayer(playerEmail)
-  }
+  }, [])
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
-  }
+  }, [])
 
-  const handleDrop = (e: React.DragEvent, teamId: string) => {
+  const handleDrop = useCallback((e: React.DragEvent, teamId: string) => {
     e.preventDefault()
     if (draggedPlayer) {
       addPlayerToTeam(teamId, draggedPlayer)
       setDraggedPlayer(null)
     }
-  }
-
-  const canFormMinimumTeams = players.length >= playersPerTeam * 4
-  const optimalTeams = Math.floor(players.length / playersPerTeam)
+  }, [draggedPlayer, addPlayerToTeam])
 
   return (
     <div className="space-y-4">
