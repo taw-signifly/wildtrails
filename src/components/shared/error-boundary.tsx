@@ -1,10 +1,55 @@
 'use client'
 
 import { Component, ErrorInfo, ReactNode } from 'react'
+import { useRouter } from 'next/navigation'
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { PageContainer } from '@/components/layout/page-container'
+
+// Navigation handlers using Next.js router
+function ErrorActions({ onReset }: { onReset: () => void }) {
+  const router = useRouter()
+
+  const handleReload = () => {
+    router.refresh()
+  }
+
+  const handleGoHome = () => {
+    router.push('/')
+  }
+
+  return (
+    <div className="flex flex-col sm:flex-row gap-3 justify-center">
+      <Button 
+        onClick={onReset}
+        variant="default"
+        className="flex items-center gap-2"
+      >
+        <RefreshCw className="h-4 w-4" />
+        Try Again
+      </Button>
+      
+      <Button 
+        onClick={handleReload}
+        variant="outline"
+        className="flex items-center gap-2"
+      >
+        <RefreshCw className="h-4 w-4" />
+        Reload Page
+      </Button>
+      
+      <Button 
+        onClick={handleGoHome}
+        variant="ghost"
+        className="flex items-center gap-2"
+      >
+        <Home className="h-4 w-4" />
+        Go Home
+      </Button>
+    </div>
+  )
+}
 
 interface Props {
   children: ReactNode
@@ -42,14 +87,6 @@ export class ErrorBoundary extends Component<Props, State> {
 
   private handleReset = () => {
     this.setState({ hasError: false, error: undefined })
-  }
-
-  private handleReload = () => {
-    window.location.reload()
-  }
-
-  private handleGoHome = () => {
-    window.location.href = '/'
   }
 
   public render() {
@@ -91,34 +128,7 @@ export class ErrorBoundary extends Component<Props, State> {
               </details>
             )}
 
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <Button 
-                onClick={this.handleReset}
-                variant="default"
-                className="flex items-center gap-2"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Try Again
-              </Button>
-              
-              <Button 
-                onClick={this.handleReload}
-                variant="outline"
-                className="flex items-center gap-2"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Reload Page
-              </Button>
-              
-              <Button 
-                onClick={this.handleGoHome}
-                variant="ghost"
-                className="flex items-center gap-2"
-              >
-                <Home className="h-4 w-4" />
-                Go Home
-              </Button>
-            </div>
+            <ErrorActions onReset={this.handleReset} />
           </div>
         </PageContainer>
       )
@@ -177,26 +187,39 @@ export function ErrorPage({
           </details>
         )}
 
-        <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          <Button 
-            onClick={reset}
-            variant="default"
-            className="flex items-center gap-2"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Try Again
-          </Button>
-          
-          <Button 
-            onClick={() => window.location.href = '/'}
-            variant="outline"
-            className="flex items-center gap-2"
-          >
-            <Home className="h-4 w-4" />
-            Go Home
-          </Button>
-        </div>
+        <ErrorPageActions onReset={reset} />
       </div>
     </PageContainer>
+  )
+}
+
+// Separate component for ErrorPage actions to use Next.js router
+function ErrorPageActions({ onReset }: { onReset: () => void }) {
+  const router = useRouter()
+
+  const handleGoHome = () => {
+    router.push('/')
+  }
+
+  return (
+    <div className="flex flex-col sm:flex-row gap-3 justify-center">
+      <Button 
+        onClick={onReset}
+        variant="default"
+        className="flex items-center gap-2"
+      >
+        <RefreshCw className="h-4 w-4" />
+        Try Again
+      </Button>
+      
+      <Button 
+        onClick={handleGoHome}
+        variant="outline"
+        className="flex items-center gap-2"
+      >
+        <Home className="h-4 w-4" />
+        Go Home
+      </Button>
+    </div>
   )
 }

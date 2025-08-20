@@ -1,4 +1,5 @@
 import { ReactNode } from 'react'
+import Link from 'next/link'
 import { ChevronRight } from 'lucide-react'
 
 import { Separator } from '@/components/ui/separator'
@@ -34,13 +35,13 @@ export function PageHeader({
               <li key={index} className="flex items-center">
                 {index > 0 && <ChevronRight className="mx-2 h-4 w-4" />}
                 {item.href ? (
-                  <a 
+                  <Link 
                     href={item.href}
                     className="hover:text-foreground transition-colors"
                     aria-current={index === breadcrumbs.length - 1 ? 'page' : undefined}
                   >
                     {item.label}
-                  </a>
+                  </Link>
                 ) : (
                   <span 
                     className={cn(

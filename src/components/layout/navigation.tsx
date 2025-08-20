@@ -12,7 +12,7 @@ import {
   Menu,
   X 
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useCallback, memo } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
@@ -62,44 +62,98 @@ interface NavigationProps {
   className?: string
 }
 
-export function Navigation({ className }: NavigationProps) {
+// Memoized navigation item component for performance
+const NavigationItemComponent = memo(function NavigationItemComponent({ 
+  item, 
+  isActive, 
+  className 
+}: { 
+  item: NavigationItem
+  isActive: boolean
+  className?: string 
+}) {
+  const Icon = item.icon
+  
+  return (
+    <Link
+      href={item.href}
+      className={className}
+      aria-current={isActive ? 'page' : undefined}
+      title={item.description}
+    >
+      <Icon className="h-4 w-4" />
+      <span className="hidden sm:inline-block">{item.name}</span>
+    </Link>
+  )
+})
+
+// Memoized mobile navigation item component
+const MobileNavigationItemComponent = memo(function MobileNavigationItemComponent({
+  item,
+  isActive,
+  onClick,
+  className
+}: {
+  item: NavigationItem
+  isActive: boolean
+  onClick: () => void
+  className?: string
+}) {
+  const Icon = item.icon
+  
+  return (
+    <Link
+      href={item.href}
+      onClick={onClick}
+      className={className}
+      aria-current={isActive ? 'page' : undefined}
+    >
+      <Icon className="h-5 w-5" />
+      <div className="flex flex-col">
+        <span>{item.name}</span>
+        {item.description && (
+          <span className="text-xs text-muted-foreground">
+            {item.description}
+          </span>
+        )}
+      </div>
+    </Link>
+  )
+})
+
+export const Navigation = memo(function Navigation({ className }: NavigationProps) {
   const pathname = usePathname()
   
   return (
     <nav className={cn("flex items-center space-x-4 lg:space-x-6", className)} role="navigation">
       {navigationItems.map((item) => {
         const isActive = pathname === item.href
-        const Icon = item.icon
         
         return (
-          <Link
+          <NavigationItemComponent
             key={item.href}
-            href={item.href}
+            item={item}
+            isActive={isActive}
             className={cn(
               "flex items-center space-x-2 text-sm font-medium transition-colors hover:text-primary",
               isActive
                 ? "text-foreground"
                 : "text-muted-foreground"
             )}
-            aria-current={isActive ? 'page' : undefined}
-            title={item.description}
-          >
-            <Icon className="h-4 w-4" />
-            <span className="hidden sm:inline-block">{item.name}</span>
-          </Link>
+          />
         )
       })}
     </nav>
   )
-}
+})
 
-export function MobileNavigation() {
+export const MobileNavigation = memo(function MobileNavigation() {
   const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(false)
 
-  const handleItemClick = () => {
+  const handleItemClick = useCallback(() => {
     setIsOpen(false)
-  }
+  }, [])
 
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
@@ -124,12 +178,12 @@ export function MobileNavigation() {
           
           {navigationItems.map((item) => {
             const isActive = pathname === item.href
-            const Icon = item.icon
             
             return (
-              <Link
+              <MobileNavigationItemComponent
                 key={item.href}
-                href={item.href}
+                item={item}
+                isActive={isActive}
                 onClick={handleItemClick}
                 className={cn(
                   "flex items-center space-x-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
@@ -137,22 +191,11 @@ export function MobileNavigation() {
                     ? "bg-accent text-accent-foreground"
                     : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                 )}
-                aria-current={isActive ? 'page' : undefined}
-              >
-                <Icon className="h-5 w-5" />
-                <div className="flex flex-col">
-                  <span>{item.name}</span>
-                  {item.description && (
-                    <span className="text-xs text-muted-foreground">
-                      {item.description}
-                    </span>
-                  )}
-                </div>
-              </Link>
+              />
             )
           })}
         </nav>
       </SheetContent>
     </Sheet>
   )
-}
+})

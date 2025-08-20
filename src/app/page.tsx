@@ -6,8 +6,13 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { getDashboardStats, getRecentTournaments } from "@/lib/actions/dashboard";
 
-export default function Home() {
+export default async function Home() {
+  const [stats, recentTournaments] = await Promise.all([
+    getDashboardStats(),
+    getRecentTournaments()
+  ]);
   return (
     <PageContainer>
       <PageHeader
@@ -32,9 +37,9 @@ export default function Home() {
             <Trophy className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">3</div>
+            <div className="text-2xl font-bold">{stats.activeTournaments}</div>
             <p className="text-xs text-muted-foreground">
-              +2 from last month
+              Currently running
             </p>
           </CardContent>
         </Card>
@@ -47,9 +52,9 @@ export default function Home() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">156</div>
+            <div className="text-2xl font-bold">{stats.registeredPlayers}</div>
             <p className="text-xs text-muted-foreground">
-              +12 from last week
+              Total registered
             </p>
           </CardContent>
         </Card>
@@ -62,9 +67,9 @@ export default function Home() {
             <Activity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">8</div>
+            <div className="text-2xl font-bold">{stats.liveMatches}</div>
             <p className="text-xs text-muted-foreground">
-              Across 2 tournaments
+              Currently playing
             </p>
           </CardContent>
         </Card>
@@ -77,9 +82,9 @@ export default function Home() {
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">1,247</div>
+            <div className="text-2xl font-bold">{stats.totalMatches.toLocaleString()}</div>
             <p className="text-xs text-muted-foreground">
-              Since platform launch
+              All time total
             </p>
           </CardContent>
         </Card>
@@ -96,46 +101,32 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {[
-                {
-                  name: "Summer Championship 2024",
-                  status: "Live",
-                  participants: 64,
-                  date: "Today"
-                },
-                {
-                  name: "Weekly Club Tournament",
-                  status: "Registration",
-                  participants: 32,
-                  date: "Tomorrow"
-                },
-                {
-                  name: "Regional Qualifiers",
-                  status: "Completed",
-                  participants: 128,
-                  date: "2 days ago"
-                }
-              ].map((tournament, index) => (
-                <div key={index} className="flex items-center justify-between space-y-0">
+              {recentTournaments.length > 0 ? recentTournaments.map((tournament) => (
+                <div key={tournament.id} className="flex items-center justify-between space-y-0">
                   <div className="space-y-1">
                     <p className="font-medium leading-none">{tournament.name}</p>
                     <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                      <span>{tournament.participants} participants</span>
+                      <span>{tournament.participants} max participants</span>
                       <span>•</span>
                       <span>{tournament.date}</span>
                     </div>
                   </div>
                   <Badge 
                     variant={
-                      tournament.status === "Live" ? "default" :
-                      tournament.status === "Registration" ? "secondary" :
+                      tournament.status === "active" ? "default" :
+                      tournament.status === "setup" ? "secondary" :
                       "outline"
                     }
                   >
-                    {tournament.status}
+                    {tournament.status.charAt(0).toUpperCase() + tournament.status.slice(1)}
                   </Badge>
                 </div>
-              ))}
+              )) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p>No tournaments created yet.</p>
+                  <p className="text-sm mt-1">Create your first tournament to get started!</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
