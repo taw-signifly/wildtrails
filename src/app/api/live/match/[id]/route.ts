@@ -53,7 +53,7 @@ export async function GET(
     const response = createSSEStream(streamId)
     
     // Log connection
-    console.log(`SSE: New match stream connection for match ${matchId} (${match.team1.name} vs ${match.team2.name})`)
+    console.log(`SSE: New match stream connection for match ${matchId} (${match.team1?.name || 'TBD'} vs ${match.team2?.name || 'TBD'})`)
     
     return response
     

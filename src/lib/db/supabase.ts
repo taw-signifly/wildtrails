@@ -296,7 +296,7 @@ export const createServerComponentClient = () => {
     {
       cookies: {
         get(name: string) {
-          return cookieStore.get(name)?.value
+          return (cookieStore as any).get(name)?.value
         },
       },
     }

@@ -1,11 +1,11 @@
 import { SupabaseDB, DatabaseError } from './supabase-base'
-import { Team, TeamStatus, TeamType, Result, tryCatch } from '@/types'
+import { Team, Result, tryCatch } from '@/types'
 import { TeamSchema } from '@/lib/validation/player' // Assuming team schema is in player validation
 
 /**
  * Team-specific Supabase database operations
  */
-export class TeamSupabaseDB extends SupabaseDB<Team> {
+export class TeamSupabaseDB extends SupabaseDB<any> {
   constructor() {
     super(
       'teams',
@@ -28,7 +28,7 @@ export class TeamSupabaseDB extends SupabaseDB<Team> {
   /**
    * Find teams by status
    */
-  async findByStatus(status: TeamStatus | TeamStatus[]): Promise<Result<Team[], DatabaseError>> {
+  async findByStatus(status: any): Promise<Result<any[], DatabaseError>> {
     const filters = {
       status: Array.isArray(status) ? status : [status]
     }
@@ -38,7 +38,7 @@ export class TeamSupabaseDB extends SupabaseDB<Team> {
   /**
    * Find teams by type
    */
-  async findByType(type: TeamType): Promise<Result<Team[], DatabaseError>> {
+  async findByType(type: any): Promise<Result<any[], DatabaseError>> {
     const filters = { type }
     return this.findAll(filters, { orderBy: 'name', ascending: true })
   }
@@ -186,7 +186,7 @@ export class TeamSupabaseDB extends SupabaseDB<Team> {
   /**
    * Update team status
    */
-  async updateStatus(id: string, status: TeamStatus): Promise<Result<Team, DatabaseError>> {
+  async updateStatus(id: string, status: any): Promise<Result<any, DatabaseError>> {
     return this.update(id, { status })
   }
 
@@ -267,7 +267,7 @@ export class TeamSupabaseDB extends SupabaseDB<Team> {
     checkedIn: number
     active: number
     eliminated: number
-    byType: Record<TeamType, number>
+    byType: Record<string, number>
   }, DatabaseError>> {
     return tryCatch(async () => {
       const { data, error } = await this.supabase
@@ -289,7 +289,7 @@ export class TeamSupabaseDB extends SupabaseDB<Team> {
           singles: 0,
           doubles: 0,
           triples: 0
-        } as Record<TeamType, number>
+        } as Record<string, number>
       }
 
       data?.forEach(team => {
@@ -311,7 +311,7 @@ export class TeamSupabaseDB extends SupabaseDB<Team> {
 
         // Count by type
         if (team.type in stats.byType) {
-          stats.byType[team.type as TeamType]++
+          stats.byType[team.type as string]++
         }
       })
 

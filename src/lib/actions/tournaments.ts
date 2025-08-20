@@ -6,11 +6,10 @@ import { TournamentSupabaseDB } from '@/lib/db/tournaments-supabase'
 // Instance of the tournament database
 const db = new TournamentSupabaseDB()
 import { TournamentFormDataSchema } from '@/lib/validation/tournament'
-import { sanitizeTournamentData, parsePaginationParams, paginateArray } from '@/lib/api'
+import { sanitizeTournamentData, paginateArray } from '@/lib/api'
 import { resultToActionResult, parseFormDataField, parseFormDataBoolean, parseFormDataNumber, parseFormDataDate, formatZodErrors, isValidTournamentType, isValidGameFormat, isValidCourtAssignmentMode, isValidScoringMode } from '@/lib/api/action-utils'
 import { Tournament, TournamentFormData, TournamentFilters, TournamentSettings } from '@/types'
-import { ActionResult, ActionState } from '@/types/actions'
-import { z } from 'zod'
+import { ActionResult } from '@/types/actions'
 
 
 /**

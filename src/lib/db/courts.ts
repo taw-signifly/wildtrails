@@ -1,6 +1,24 @@
-import { BaseDB, DatabaseConfig, RecordNotFoundError, DatabaseError } from './base'
-import { Court, Result, tryCatch } from '@/types'
+import { BaseDB, DatabaseConfig, RecordNotFoundError, DatabaseError, type BaseEntity } from './base'
+import { Result, tryCatch } from '@/types'
 import { CourtSchema } from '@/lib/validation/match'
+
+// Legacy Court entity for JSON database compatibility
+interface Court extends BaseEntity {
+  name: string
+  location: string
+  dimensions: {
+    length: number
+    width: number
+    throwingDistance: number
+  }
+  surface: 'gravel' | 'sand' | 'dirt' | 'artificial'
+  lighting: boolean
+  covered: boolean
+  status: CourtStatus
+  currentMatch?: string
+  nextMatch?: string
+  amenities: string[]
+}
 
 /**
  * Court status type for availability tracking

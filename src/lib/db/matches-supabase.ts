@@ -13,7 +13,7 @@ export class MatchSupabaseDB extends SupabaseDB<Match> {
         tableName: 'matches',
         enableRealtime: true
       },
-      MatchSchema
+      MatchSchema as any
     )
   }
 
@@ -74,7 +74,7 @@ export class MatchSupabaseDB extends SupabaseDB<Match> {
    * Find active matches (in progress)
    */
   async findActive(): Promise<Result<Match[], DatabaseError>> {
-    return this.findByStatus('in_progress')
+    return this.findByStatus('active')
   }
 
   /**
@@ -105,7 +105,7 @@ export class MatchSupabaseDB extends SupabaseDB<Match> {
   async updateStatus(id: string, status: MatchStatus): Promise<Result<Match, DatabaseError>> {
     const updates: any = { status }
     
-    if (status === 'in_progress') {
+    if (status === 'active') {
       updates.start_time = new Date().toISOString()
     } else if (status === 'completed') {
       updates.end_time = new Date().toISOString()
@@ -126,10 +126,10 @@ export class MatchSupabaseDB extends SupabaseDB<Match> {
    */
   async setWinner(id: string, winnerId: string): Promise<Result<Match, DatabaseError>> {
     return this.update(id, { 
-      winner_id: winnerId,
+      winner: winnerId,
       status: 'completed',
-      end_time: new Date().toISOString()
-    })
+      endTime: new Date().toISOString()
+    } as any)
   }
 
   /**
@@ -143,7 +143,7 @@ export class MatchSupabaseDB extends SupabaseDB<Match> {
    * Remove court assignment
    */
   async removeCourtAssignment(id: string): Promise<Result<Match, DatabaseError>> {
-    return this.update(id, { court_id: null })
+    return this.update(id, { courtId: undefined } as any)
   }
 
   /**

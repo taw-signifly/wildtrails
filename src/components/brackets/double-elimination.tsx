@@ -31,7 +31,7 @@ export function DoubleEliminationBracket({
   // Find tournament status
   const grandFinalMatch = grandFinalMatches[0]
   const champion = grandFinalMatch?.status === 'completed' && grandFinalMatch.winner
-    ? (grandFinalMatch.team1.id === grandFinalMatch.winner 
+    ? (grandFinalMatch.team1?.id === grandFinalMatch.winner 
         ? grandFinalMatch.team1 
         : grandFinalMatch.team2)
     : null
@@ -126,7 +126,7 @@ export function DoubleEliminationBracket({
                   </Badge>
                 </div>
                 <div className="text-xs text-gray-600">
-                  {match.team1.name} vs {match.team2.name}
+                  {match.team1?.name || 'TBD'} vs {match.team2?.name || 'TBD'}
                 </div>
                 {match.courtId && (
                   <div className="text-xs text-gray-500 mt-1">
@@ -411,7 +411,7 @@ export function DoubleEliminationBracket({
                   <div className="flex justify-between items-center">
                     <div>
                       <div className="font-medium">
-                        {grandFinalMatch.team1.name} vs {grandFinalMatch.team2.name}
+                        {grandFinalMatch.team1?.name || 'TBD'} vs {grandFinalMatch.team2?.name || 'TBD'}
                       </div>
                       <div className="text-sm text-gray-600">
                         Winner of Loser Bracket vs Winner of Winner Bracket

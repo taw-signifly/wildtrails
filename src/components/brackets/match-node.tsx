@@ -52,8 +52,8 @@ export function MatchNode({
     return match.winner === teamId ? 'font-semibold text-green-700' : 'text-gray-600'
   }
 
-  const getTeamDisplay = (team: Team) => {
-    if (!team.id) {
+  const getTeamDisplay = (team?: Team) => {
+    if (!team || !team.id) {
       return { name: 'TBD', players: [] }
     }
     
@@ -123,7 +123,7 @@ export function MatchNode({
         aria-label={`Match between ${team1Display.name} and ${team2Display.name}`}
       >
         <div className="space-y-1">
-          <div className={cn('truncate', getWinnerHighlight(match.team1.id || ''))}>
+          <div className={cn('truncate', getWinnerHighlight(match.team1?.id || ''))}>
             {team1Display.name}
             {showScores && match.score && (
               <span className="ml-2 font-medium">
@@ -132,7 +132,7 @@ export function MatchNode({
             )}
           </div>
           <hr className="border-gray-300" />
-          <div className={cn('truncate', getWinnerHighlight(match.team2.id || ''))}>
+          <div className={cn('truncate', getWinnerHighlight(match.team2?.id || ''))}>
             {team2Display.name}
             {showScores && match.score && (
               <span className="ml-2 font-medium">
@@ -159,13 +159,13 @@ export function MatchNode({
         aria-label={`Match between ${team1Display.name} and ${team2Display.name}`}
       >
         <div className="space-y-1">
-          <div className={cn('flex justify-between items-center', getWinnerHighlight(match.team1.id || ''))}>
+          <div className={cn('flex justify-between items-center', getWinnerHighlight(match.team1?.id || ''))}>
             <span className="truncate flex-1">{team1Display.name}</span>
             {showScores && match.score && (
               <span className="ml-2 font-medium">{match.score.team1}</span>
             )}
           </div>
-          <div className={cn('flex justify-between items-center', getWinnerHighlight(match.team2.id || ''))}>
+          <div className={cn('flex justify-between items-center', getWinnerHighlight(match.team2?.id || ''))}>
             <span className="truncate flex-1">{team2Display.name}</span>
             {showScores && match.score && (
               <span className="ml-2 font-medium">{match.score.team2}</span>
@@ -213,7 +213,7 @@ export function MatchNode({
         {/* Teams */}
         <div className="space-y-2 flex-1">
           {/* Team 1 */}
-          <div className={cn('flex justify-between items-center', getWinnerHighlight(match.team1.id || ''))}>
+          <div className={cn('flex justify-between items-center', getWinnerHighlight(match.team1?.id || ''))}>
             <div className="flex-1 min-w-0">
               <div className="font-medium text-sm truncate">
                 {team1Display.name}
@@ -235,7 +235,7 @@ export function MatchNode({
           <hr className="border-gray-200" />
 
           {/* Team 2 */}
-          <div className={cn('flex justify-between items-center', getWinnerHighlight(match.team2.id || ''))}>
+          <div className={cn('flex justify-between items-center', getWinnerHighlight(match.team2?.id || ''))}>
             <div className="flex-1 min-w-0">
               <div className="font-medium text-sm truncate">
                 {team2Display.name}

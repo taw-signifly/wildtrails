@@ -124,10 +124,12 @@ export function CourtAssignmentPanel({
                   <div className="text-sm mb-2">
                     <div className="font-medium text-gray-700">Currently Playing:</div>
                     <div className="text-gray-600">
-                      {status.currentMatch.team1.name} vs {status.currentMatch.team2.name}
+                      {status.currentMatch.team1?.name || 'TBD'} vs {status.currentMatch.team2?.name || 'TBD'}
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
-                      Score: {status.currentMatch.score.team1} - {status.currentMatch.score.team2}
+                      {status.currentMatch.score && (
+                        <>Score: {status.currentMatch.score.team1} - {status.currentMatch.score.team2}</>
+                      )}
                       {status.currentMatch.startTime && (
                         <span className="ml-2">
                           Started {new Date(status.currentMatch.startTime).toLocaleTimeString()}
@@ -151,7 +153,7 @@ export function CourtAssignmentPanel({
                   <div className="text-sm">
                     <div className="font-medium text-gray-700">Next Up:</div>
                     <div className="text-gray-600">
-                      {status.nextMatch.team1.name} vs {status.nextMatch.team2.name}
+                      {status.nextMatch.team1?.name || 'TBD'} vs {status.nextMatch.team2?.name || 'TBD'}
                     </div>
                     <div className="text-xs text-gray-500">
                       {status.nextMatch.roundName}
@@ -187,7 +189,7 @@ export function CourtAssignmentPanel({
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <div className="font-medium text-sm">
-                      {match.team1.name} vs {match.team2.name}
+                      {match.team1?.name || 'TBD'} vs {match.team2?.name || 'TBD'}
                     </div>
                     <div className="text-xs text-gray-500">
                       {match.roundName}

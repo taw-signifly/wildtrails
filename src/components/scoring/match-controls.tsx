@@ -29,7 +29,7 @@ export function MatchControls({
   const isActive = match.status === 'active'
   const isComplete = match.status === 'completed'
   const isScheduled = match.status === 'scheduled'
-  const hasEnds = match.ends.length > 0
+  const hasEnds = (match.ends?.length || 0) > 0
 
   const handleStartMatch = async () => {
     setIsStarting(true)
@@ -52,8 +52,8 @@ export function MatchControls({
     setIsCompleting(true)
     try {
       // Determine winner based on score
-      const winnerId = match.score.team1 > match.score.team2 ? match.team1.id : match.team2.id
-      const result = await completeMatch(match.id, match.score, winnerId)
+      const winnerId = match.score?.team1 && match.score?.team2 && match.score.team1 > match.score.team2 ? match.team1?.id : match.team2?.id
+      const result = await completeMatch(match.id, match.score!, winnerId!)
       if (result.success) {
         console.log('Match completed successfully')
         setShowConfirmComplete(false)
@@ -115,7 +115,7 @@ export function MatchControls({
         </div>
         <div>
           <span className="font-medium text-gray-700">Ends Played:</span>
-          <span className="ml-2">{match.ends.length}</span>
+          <span className="ml-2">{match.ends?.length || 0}</span>
         </div>
         {match.startTime && (
           <div>
@@ -234,11 +234,11 @@ export function MatchControls({
           <div className="flex items-center gap-2 text-green-800">
             <span className="text-lg">🏆</span>
             <span className="font-medium">
-              Match Complete - {match.winner === match.team1.id ? match.team1.name : match.team2.name} wins
+              Match Complete - {match.winner === match.team1?.id ? match.team1?.name : match.team2?.name} wins
             </span>
           </div>
           <div className="text-sm text-green-700 mt-1">
-            Final Score: {match.score.team1} - {match.score.team2}
+            Final Score: {match.score?.team1} - {match.score?.team2}
             {match.endTime && (
               <span className="ml-3">
                 Completed at {new Date(match.endTime).toLocaleTimeString()}

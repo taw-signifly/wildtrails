@@ -181,6 +181,7 @@ export function BracketRenderer({
     
     const team = matches
       .flatMap(m => [m.team1, m.team2])
+      .filter(t => t !== undefined)
       .find(t => t.id === teamId)
     
     if (team) {
@@ -338,8 +339,8 @@ export function BracketRenderer({
           {positions.map(position => {
             const isSelected = viewState.selectedMatch === position.match.id
             const isHighlighted = 
-              viewState.highlightedTeam === position.match.team1.id ||
-              viewState.highlightedTeam === position.match.team2.id
+              viewState.highlightedTeam === position.match.team1?.id ||
+              viewState.highlightedTeam === position.match.team2?.id
 
             return (
               <MatchNode
@@ -355,7 +356,7 @@ export function BracketRenderer({
                 onClick={() => handleMatchClick(position.match)}
                 onHover={(isHovered) => {
                   if (isHovered) {
-                    handleTeamHighlight(position.match.team1.id || '')
+                    handleTeamHighlight(position.match.team1?.id || '')
                   }
                 }}
               />

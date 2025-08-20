@@ -5,7 +5,7 @@ import { TournamentSchema, TournamentFormDataSchema } from '@/lib/validation/tou
 /**
  * Tournament-specific Supabase database operations
  */
-export class TournamentSupabaseDB extends SupabaseDB<Tournament> {
+export class TournamentSupabaseDB extends SupabaseDB<any> {
   constructor() {
     super(
       'tournaments',
@@ -42,7 +42,7 @@ export class TournamentSupabaseDB extends SupabaseDB<Tournament> {
         format: validatedFormData.format,
         max_players: validatedFormData.maxPlayers,
         start_date: validatedFormData.startDate,
-        end_date: validatedFormData.endDate,
+        end_date: (validatedFormData as any).endDate,
         registration_deadline: validatedFormData.registrationDeadline,
         location: validatedFormData.location,
         settings: {

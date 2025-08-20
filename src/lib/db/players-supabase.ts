@@ -5,7 +5,7 @@ import { PlayerSchema } from '@/lib/validation/player'
 /**
  * Player-specific Supabase database operations
  */
-export class PlayerSupabaseDB extends SupabaseDB<Player> {
+export class PlayerSupabaseDB extends SupabaseDB<any> {
   constructor() {
     super(
       'players',
