@@ -461,6 +461,29 @@ export {
   FileOperationError
 } from '@/lib/db/base'
 
+// Export scoring types
+export type {
+  EndScoreResult,
+  EndMeasurement,
+  RelativePosition,
+  ScoreValidationResult,
+  ScoreIntegrityCheck,
+  RuleViolation,
+  TeamStatistics as ScoringTeamStatistics,
+  PlayerStatistics as ScoringPlayerStatistics,
+  TournamentStatistics as ScoringTournamentStatistics,
+  EndAnalysis,
+  MatchAnalysis,
+  EndInput,
+  ScoringConfiguration,
+  DistanceCalculationResult,
+  ScoringEngineOptions,
+  ValidationOptions,
+  StatisticsOptions,
+  ScoringEvent,
+  ScoringEngineState
+} from './scoring'
+
 // Export all types for easy importing
 export type {
   // Re-export common types for convenience
