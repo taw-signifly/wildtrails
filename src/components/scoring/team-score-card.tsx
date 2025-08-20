@@ -178,10 +178,10 @@ export function TeamScoreCard({
         <div className="mt-4 pt-4 border-t border-gray-200">
           <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
             <div>
-              <span className="font-medium">Wins:</span> {team.stats.wins}
+              <span className="font-medium">Wins:</span> {team.stats.matchesWon}
             </div>
             <div>
-              <span className="font-medium">Win %:</span> {Math.round(team.stats.winPercentage)}%
+              <span className="font-medium">Win %:</span> {team.stats.matchesPlayed > 0 ? Math.round((team.stats.matchesWon / team.stats.matchesPlayed) * 100) : 0}%
             </div>
           </div>
         </div>

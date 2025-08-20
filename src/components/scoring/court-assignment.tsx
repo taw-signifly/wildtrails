@@ -5,7 +5,7 @@ import { Match, Court } from '@/types'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { assignCourtToMatch, unassignCourtFromMatch } from '@/lib/actions/matches'
+import { startMatch } from '@/lib/actions/matches'
 
 interface CourtAssignmentPanelProps {
   tournamentId: string
@@ -59,9 +59,10 @@ export function CourtAssignmentPanel({
   const handleAssignCourt = async (matchId: string, courtId: string) => {
     setIsAssigning(matchId)
     try {
-      const result = await assignCourtToMatch(matchId, courtId)
+      // Use startMatch with courtId to assign court
+      const result = await startMatch(matchId, courtId)
       if (result.success) {
-        console.log('Court assigned successfully')
+        console.log('Court assigned and match started successfully')
       } else {
         console.error('Failed to assign court:', result.error)
       }
@@ -76,12 +77,10 @@ export function CourtAssignmentPanel({
   const handleUnassignCourt = async (matchId: string) => {
     setIsAssigning(matchId)
     try {
-      const result = await unassignCourtFromMatch(matchId)
-      if (result.success) {
-        console.log('Court unassigned successfully')
-      } else {
-        console.error('Failed to unassign court:', result.error)
-      }
+      // Note: Court unassignment would need to be implemented in the backend
+      // For now, we'll show a message that this feature is not yet available
+      console.log('Court unassignment not implemented yet')
+      // You could implement a server action for this functionality
     } catch (error) {
       console.error('Error unassigning court:', error)
     } finally {

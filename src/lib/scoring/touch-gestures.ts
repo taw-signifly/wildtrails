@@ -117,12 +117,13 @@ export class TouchGestureHandler {
     // Use Haptic API if available (iOS Safari)
     if ('ontouchstart' in window && 'webkitTapHighlightColor' in document.documentElement.style) {
       try {
-        // @ts-ignore - WebKit specific API
+        // @ts-expect-error - WebKit specific API not in TypeScript definitions
         if (window.navigator.vibrate) {
           const duration = intensity === 'light' ? 10 : intensity === 'medium' ? 20 : 50
+          // @ts-expect-error - WebKit specific API not in TypeScript definitions
           window.navigator.vibrate(duration)
         }
-      } catch (error) {
+      } catch {
         // Silently fail if haptic feedback is not supported
       }
     }

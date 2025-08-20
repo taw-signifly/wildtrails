@@ -20,6 +20,20 @@ export function TournamentSettings() {
     }
   }, [setupData.settings])
 
+  // Initialize default values for required fields
+  useEffect(() => {
+    const needsDefaults = !formData.maxPoints || !formData.maxPlayers
+    if (needsDefaults) {
+      const newData = {
+        ...formData,
+        maxPoints: formData.maxPoints || 13,
+        maxPlayers: formData.maxPlayers || getRecommendedMaxPlayers()
+      }
+      setFormData(newData)
+      updateStepData('settings', newData)
+    }
+  }, [formData.maxPoints, formData.maxPlayers, updateStepData, formData])
+
   const handleInputChange = (field: keyof TournamentSettingsForm, value: number | boolean) => {
     const newData = { ...formData, [field]: value }
     setFormData(newData)

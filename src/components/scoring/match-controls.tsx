@@ -51,7 +51,9 @@ export function MatchControls({
   const handleCompleteMatch = async () => {
     setIsCompleting(true)
     try {
-      const result = await completeMatch(match.id)
+      // Determine winner based on score
+      const winnerId = match.score.team1 > match.score.team2 ? match.team1.id : match.team2.id
+      const result = await completeMatch(match.id, match.score, winnerId)
       if (result.success) {
         console.log('Match completed successfully')
         setShowConfirmComplete(false)
@@ -253,10 +255,10 @@ export function MatchControls({
           <div>• Complete end-by-end scoring for detailed tracking</div>
           <div>• Undo the last end if you made a mistake</div>
           {isScheduled && (
-            <div>• Click "Start Match" to begin scoring</div>
+            <div>• Click &quot;Start Match&quot; to begin scoring</div>
           )}
           {isActive && (
-            <div>• Click "Complete Match" when one team reaches 13 points</div>
+            <div>• Click &quot;Complete Match&quot; when one team reaches 13 points</div>
           )}
         </div>
       </div>

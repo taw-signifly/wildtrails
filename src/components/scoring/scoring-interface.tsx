@@ -51,7 +51,7 @@ export function ScoringInterface({
     lastError,
     canUndo,
     undoLastAction
-  } = useOptimisticScoring(selectedMatch)
+  } = useOptimisticScoring(selectedMatch || null)
 
   // Use optimistic match data if available, fallback to selected match
   const displayMatch = optimisticMatch || selectedMatch

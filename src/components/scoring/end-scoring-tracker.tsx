@@ -33,13 +33,14 @@ export function EndScoringTracker({
 
   // Calculate running scores for display
   const runningScores = useMemo(() => {
-    const scores = { [match.team1.id]: 0, [match.team2.id]: 0 }
+    const scores: Record<string, number> = { [match.team1.id]: 0, [match.team2.id]: 0 }
     
-    return match.ends.map((end, index) => {
+    return match.ends.map((end) => {
       scores[end.winner] += end.points
       return {
         endNumber: end.endNumber,
-        ...scores,
+        team1Score: scores[match.team1.id],
+        team2Score: scores[match.team2.id],
         endData: end
       }
     })
@@ -196,7 +197,7 @@ export function EndScoringTracker({
                     +{end.points}
                   </div>
                   <div className="font-mono text-xs">
-                    {endScore[match.team1.id]} - {endScore[match.team2.id]}
+                    {endScore.team1Score} - {endScore.team2Score}
                   </div>
                 </div>
               )

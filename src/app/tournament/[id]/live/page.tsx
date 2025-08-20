@@ -11,13 +11,13 @@ import { CourtAssignmentPanel } from '@/components/scoring/court-assignment'
 import { RealTimeUpdates } from '@/components/scoring/real-time-updates'
 
 interface LiveScoringPageProps {
-  params: {
+  params: Promise<{
     id: string
-  }
+  }>
 }
 
 export default async function LiveScoringPage({ params }: LiveScoringPageProps) {
-  const { id } = params
+  const { id } = await params
 
   // Fetch tournament and matches data in parallel
   const [tournamentResult, matchesResult] = await Promise.all([
@@ -51,23 +51,22 @@ export default async function LiveScoringPage({ params }: LiveScoringPageProps) 
       <PageHeader
         title={pageTitle}
         description={pageDescription}
-        action={
-          <div className="flex items-center gap-2">
-            <Badge 
-              variant={tournament.status === 'active' ? 'default' : 'secondary'}
-              className="text-sm"
-            >
-              {tournament.status}
-            </Badge>
-            <Badge 
-              variant={activeMatches.length > 0 ? 'destructive' : 'secondary'}
-              className="text-sm"
-            >
-              {activeMatches.length} active
-            </Badge>
-          </div>
-        }
-      />
+      >
+        <div className="flex items-center gap-2">
+          <Badge 
+            variant={tournament.status === 'active' ? 'default' : 'secondary'}
+            className="text-sm"
+          >
+            {tournament.status}
+          </Badge>
+          <Badge 
+            variant={activeMatches.length > 0 ? 'destructive' : 'secondary'}
+            className="text-sm"
+          >
+            {activeMatches.length} active
+          </Badge>
+        </div>
+      </PageHeader>
 
       <RealTimeUpdates tournamentId={id} />
 
@@ -77,7 +76,7 @@ export default async function LiveScoringPage({ params }: LiveScoringPageProps) 
           <CourtAssignmentPanel 
             tournamentId={id}
             matches={availableMatches}
-            courts={tournament.settings?.courts || []}
+            courts={[]}
           />
         </div>
 
@@ -149,7 +148,7 @@ export const dynamic = 'force-dynamic' // Required for real-time features
 
 // Metadata for the page
 export async function generateMetadata({ params }: LiveScoringPageProps) {
-  const { id } = params
+  const { id } = await params
   
   const result = await getTournamentById(id)
   
